@@ -21,14 +21,6 @@ RUN apt-get -y update && \
     gdb \
     netcat \
     strace \
-    libcap-dev \
-    libpcre2-dev \
-    libpcre2-8-0 \
-    libcurl4-openssl-dev \
-    libjson-c-dev \
-    pkg-config \
-    zlib1g-dev \
-    automake libtool m4 \
     wget
 
 # Add a new user ubuntu, pass: ubuntu
@@ -84,36 +76,72 @@ ENV AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
 
 RUN mkdir $WORKDIR
 
-COPY --chown=ubuntu:ubuntu gcov.patch ${WORKDIR}/gcov.patch
+USER root
+RUN apt-get -y install sshpass
+
+
+COPY --chown=ubuntu:ubuntu rand.patch ${WORKDIR}/rand.patch
+COPY --chown=ubuntu:ubuntu rand.inc ${WORKDIR}/rand.inc
 
 # Set up environment variables for ASAN
 env ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_after_return=1:detect_container_overflow=0:poison_array_cookie=0:malloc_fill_byte=0:max_malloc_fill_size=16777216'
 
-# Download and compile Lighttpd1.4 for fuzzing
-RUN cd $WORKDIR && \
-    git clone https://git.lighttpd.net/lighttpd/lighttpd1.4.git lighttpd1 && \
-    cd lighttpd1 && \
-    git checkout 9f38b63cae3e2 && \
-    ./autogen.sh && \ 
-    CC=afl-clang-fast CXX=afl-clang-fast++ ./configure --enable-static --disable-shared && \
-    AFL_USE_ASAN=1 make clean all $MAKE_OPT || make all
 
+# Download and compile OpenSSL 1.0.2
+# (for compatibility with older OpenSSH used in this benchmark)
+RUN cd ${WORKDIR} && \
+    git clone https://github.com/openssl/openssl openssl && \
+    cd openssl && \
+    git checkout 12ad22d && \
+    ./Configure linux-x86_64-clang shared --prefix=$WORKDIR/openssl-install && \
+    make $MAKE_OPT && \
+    make install
 
-# Download and compile Lighttpd1.4 for coverage analysis
-RUN cd $WORKDIR && \
-    git clone https://git.lighttpd.net/lighttpd/lighttpd1.4.git lighttpd1-gcov && \
-    cd lighttpd1-gcov && \
-    git checkout 9f38b63cae3e2 && \
-    patch -p1 < ${WORKDIR}/gcov.patch && \
-    ./autogen.sh && \ 
-    CFLAGS="-fprofile-arcs -ftest-coverage" CPPFLAGS="-fprofile-arcs -ftest-coverage" CXXFLAGS="-fprofile-arcs -ftest-coverage" LDFLAGS="-fprofile-arcs -ftest-coverage" ./configure --enable-static --disable-shared && \
-    make clean all
+ENV LD_LIBRARY_PATH="${WORKDIR}/openssl-install/lib"
 
-COPY --chown=ubuntu:ubuntu in-http ${WORKDIR}/in-http
-COPY --chown=ubuntu:ubuntu http.dict ${WORKDIR}/http.dict
+# Download and compile OpenSSH for fuzzing
+RUN cd ${WORKDIR} && \
+    git clone https://github.com/vegard/openssh-portable.git openssh && \
+    cd openssh && \
+    git checkout 7cfea58 && \
+    cp ${WORKDIR}/rand.inc . && \
+    patch -p1 < ${WORKDIR}/rand.patch && \
+    autoreconf && \
+    ./configure \
+    CC="afl-clang-fast" \
+    CFLAGS="-g -O3 -I$WORKDIR/openssl-install/include" \
+    --prefix=$PWD/install \
+    --with-openssl=$WORKDIR/openssl-install \
+    --with-ldflags="-L$WORKDIR/openssl-install/lib" \
+    --with-privsep-path=$PWD/var-empty \
+    --with-sandbox=no \
+    --with-privsep-user=ubuntu && \
+    AFL_USE_ASAN=1 make $MAKE_OPT && \
+    make install
+
+# Download and compile OpenSSH for coverage analysis
+RUN cd ${WORKDIR} && \
+    git clone https://github.com/vegard/openssh-portable.git openssh-gcov && \
+    cd openssh-gcov && \
+    git checkout 7cfea58 && \
+    cp ${WORKDIR}/rand.inc . && \
+    patch -p1 < ${WORKDIR}/rand.patch && \
+    autoreconf && \
+    ./configure \
+    CC="gcc" \
+    CFLAGS="-g -O3 -fprofile-arcs -ftest-coverage -I$WORKDIR/openssl-install/include" \
+    LDFLAGS="-fprofile-arcs -ftest-coverage" \
+    --with-openssl=$WORKDIR/openssl-install \
+    --with-ldflags="-L$WORKDIR/openssl-install/lib" \
+    --prefix=$PWD/install \
+    --with-privsep-path=$PWD/var-empty \
+    --with-sandbox=no \
+    --with-privsep-user=ubuntu && \
+    make $MAKE_OPT && \
+    make install
+
+COPY --chown=ubuntu:ubuntu in-ssh ${WORKDIR}/in-ssh
+COPY --chown=ubuntu:ubuntu ssh.dict ${WORKDIR}/ssh.dict
 COPY --chown=ubuntu:ubuntu cov_script.sh ${WORKDIR}/cov_script
 COPY --chown=ubuntu:ubuntu run.sh ${WORKDIR}/run
-COPY --chown=ubuntu:ubuntu inputs ${WORKDIR}/inputs
-COPY --chown=ubuntu:ubuntu lighttpd.conf ${WORKDIR}/lighttpd.conf
 
-RUN cp -rf ${WORKDIR}/inputs/* /tmp/

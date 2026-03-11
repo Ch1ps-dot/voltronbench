@@ -21,14 +21,6 @@ RUN apt-get -y update && \
     gdb \
     netcat \
     strace \
-    libcap-dev \
-    libpcre2-dev \
-    libpcre2-8-0 \
-    libcurl4-openssl-dev \
-    libjson-c-dev \
-    pkg-config \
-    zlib1g-dev \
-    automake libtool m4 \
     wget
 
 # Add a new user ubuntu, pass: ubuntu
@@ -84,36 +76,36 @@ ENV AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
 
 RUN mkdir $WORKDIR
 
-COPY --chown=ubuntu:ubuntu gcov.patch ${WORKDIR}/gcov.patch
+USER root
+RUN apt-get -y install dnsutils
+
+COPY --chown=ubuntu:ubuntu dnsmasq.patch ${WORKDIR}/dnsmasq.patch
 
 # Set up environment variables for ASAN
 env ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_after_return=1:detect_container_overflow=0:poison_array_cookie=0:malloc_fill_byte=0:max_malloc_fill_size=16777216'
 
-# Download and compile Lighttpd1.4 for fuzzing
+# Download and compile Dnsmasq for fuzzing
 RUN cd $WORKDIR && \
-    git clone https://git.lighttpd.net/lighttpd/lighttpd1.4.git lighttpd1 && \
-    cd lighttpd1 && \
-    git checkout 9f38b63cae3e2 && \
-    ./autogen.sh && \ 
-    CC=afl-clang-fast CXX=afl-clang-fast++ ./configure --enable-static --disable-shared && \
-    AFL_USE_ASAN=1 make clean all $MAKE_OPT || make all
+    git clone git://thekelleys.org.uk/dnsmasq.git && \
+    cd dnsmasq && \
+    git checkout v2.73rc6 && \
+    patch -p1 < ${WORKDIR}/dnsmasq.patch && \
+    AFL_USE_ASAN=1 CC=afl-clang-fast make $MAKE_OPT
 
-
-# Download and compile Lighttpd1.4 for coverage analysis
+# Download and compile Dnsmasq for coverage analysis
 RUN cd $WORKDIR && \
-    git clone https://git.lighttpd.net/lighttpd/lighttpd1.4.git lighttpd1-gcov && \
-    cd lighttpd1-gcov && \
-    git checkout 9f38b63cae3e2 && \
-    patch -p1 < ${WORKDIR}/gcov.patch && \
-    ./autogen.sh && \ 
-    CFLAGS="-fprofile-arcs -ftest-coverage" CPPFLAGS="-fprofile-arcs -ftest-coverage" CXXFLAGS="-fprofile-arcs -ftest-coverage" LDFLAGS="-fprofile-arcs -ftest-coverage" ./configure --enable-static --disable-shared && \
-    make clean all
+    git clone git://thekelleys.org.uk/dnsmasq.git dnsmasq-gcov && \
+    cd dnsmasq-gcov && \
+    git checkout v2.73rc6 && \
+    patch -p1 < ${WORKDIR}/dnsmasq.patch && \
+    make CFLAGS="-fprofile-arcs -ftest-coverage" LDFLAGS="-fprofile-arcs -ftest-coverage" $MAKE_OPT
 
-COPY --chown=ubuntu:ubuntu in-http ${WORKDIR}/in-http
-COPY --chown=ubuntu:ubuntu http.dict ${WORKDIR}/http.dict
+
+COPY --chown=ubuntu:ubuntu in-dns ${WORKDIR}/in-dns
+COPY --chown=ubuntu:ubuntu dns.dict ${WORKDIR}/dns.dict
 COPY --chown=ubuntu:ubuntu cov_script.sh ${WORKDIR}/cov_script
 COPY --chown=ubuntu:ubuntu run.sh ${WORKDIR}/run
-COPY --chown=ubuntu:ubuntu inputs ${WORKDIR}/inputs
-COPY --chown=ubuntu:ubuntu lighttpd.conf ${WORKDIR}/lighttpd.conf
+COPY --chown=ubuntu:ubuntu dnsmasq.conf ${WORKDIR}/dnsmasq.conf
 
-RUN cp -rf ${WORKDIR}/inputs/* /tmp/
+RUN cp ${WORKDIR}/dnsmasq.conf /etc/ && \
+    echo address=/test.com/5.5.5.5 | sudo tee -a /etc/dnsmasq.conf

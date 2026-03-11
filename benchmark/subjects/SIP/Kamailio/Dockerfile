@@ -63,6 +63,11 @@ COPY --chown=ubuntu:ubuntu chatafl-cl2 chatafl-cl2
 RUN cd chatafl-cl2 && \
     make clean all $MAKE_OPT && \
     cd llvm_mode && make $MAKE_OPT
+
+COPY --chown=ubuntu:ubuntu voltron voltron
+RUN cd voltron && \
+    wget -qO- https://astral.sh/uv/install.sh | sh && \
+    uv sync 
     
 # Set up environment variables for AFLNet
 ENV WORKDIR="/home/ubuntu/experiments"
