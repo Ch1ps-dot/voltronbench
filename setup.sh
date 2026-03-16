@@ -1,13 +1,14 @@
 #!/bin/bash
 
-if [ -z $KEY ]; then
-    echo "NO OPENAI API KEY PROVIDED! Please set the KEY environment variable"
-    exit 0
-fi
+MODEL="gpt-4-turbo"
+URL="https:\/\/xiaoai.plus\/v1"
+KEY="sk-vUIK7aS2md6wOsKyEsEEDzzDYNu5BwwaQ9UofpG9N7XB6egQ"
 
 # Update the openAI key
 for x in ChatAFL;
 do
+  sed -i "s/#define MODEL \".*\"/#define MODEL \"$MODEL\"/" $x/chat-llm.h
+  sed -i "s/#define URL \".*\"/#define URL \"$URL\"/" $x/chat-llm.h
   sed -i "s/#define OPENAI_TOKEN \".*\"/#define OPENAI_TOKEN \"$KEY\"/" $x/chat-llm.h
 done
 
