@@ -57,16 +57,6 @@ RUN cd chatafl && \
     make clean all $MAKE_OPT && \
     cd llvm_mode && make $MAKE_OPT
 
-COPY --chown=ubuntu:ubuntu chatafl-cl1 chatafl-cl1
-RUN cd chatafl-cl1 && \
-    make clean all $MAKE_OPT && \
-    cd llvm_mode && make $MAKE_OPT
-
-COPY --chown=ubuntu:ubuntu chatafl-cl2 chatafl-cl2
-RUN cd chatafl-cl2 && \
-    make clean all $MAKE_OPT && \
-    cd llvm_mode && make $MAKE_OPT
-
 COPY --chown=ubuntu:ubuntu voltron voltron
 RUN cd voltron && \
     . $HOME/.local/bin/env && uv sync 
