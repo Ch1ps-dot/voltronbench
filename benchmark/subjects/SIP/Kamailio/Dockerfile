@@ -56,8 +56,7 @@ RUN cd chatafl && \
 
 COPY --chown=ubuntu:ubuntu voltron voltron
 RUN cd voltron && \
-    wget -qO- https://astral.sh/uv/install.sh | sh && \
-    uv sync 
+    . $HOME/.local/bin/env && uv sync  
     
 # Set up environment variables for AFLNet
 ENV WORKDIR="/home/ubuntu/experiments"

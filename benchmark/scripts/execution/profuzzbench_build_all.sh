@@ -4,17 +4,17 @@
 #export MAKE_OPT="-j4"
 
 cd $PFBENCH
-cd subjects/DNS/Dnsmsqs
-docker build . -t Dnsmsqs-vol --build-arg MAKE_OPT $NO_CACHE
+cd subjects/DNS/Dnsmasq
+docker build . -t Dnsmsqs --build-arg MAKE_OPT $NO_CACHE
 
 cd subjects/DTLS/TinyDTLS
 docker build . -t TinyDTLS-vol --build-arg MAKE_OPT $NO_CACHE
 
-cd subjects/FTP/SSH
-docker build . -t OpenSSH-vol --build-arg MAKE_OPT $NO_CACHE
+cd subjects/SSH/OpenSSH
+docker build . -t OpenSSH --build-arg MAKE_OPT $NO_CACHE
 
-cd subjects/FTP/TLS
-docker build . -t OpenSSL-vol --build-arg MAKE_OPT $NO_CACHE
+cd subjects/TLS/OpenSSL
+docker build . -t OpenSSL --build-arg MAKE_OPT $NO_CACHE
 
 cd subjects/FTP/LightFTP
 docker build . -t lightftp-vol --build-arg MAKE_OPT $NO_CACHE
