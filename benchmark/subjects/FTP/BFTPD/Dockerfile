@@ -38,6 +38,9 @@ RUN pip3 install gcovr==4.2
 
 # Use ubuntu as default username
 USER ubuntu
+
+# Activate uv by adding to PATH
+
 WORKDIR /home/ubuntu
 
 # Import environment variable to pass as parameter to make (e.g., to make parallel builds with -j)
@@ -56,8 +59,9 @@ RUN cd chatafl && \
 
 COPY --chown=ubuntu:ubuntu voltron voltron
 RUN wget -qO- https://astral.sh/uv/install.sh | sh
-RUN cd voltron && \
-    . $HOME/.local/bin/env && uv sync 
+ENV PATH="/home/ubuntu/.local/bin:$PATH"
+RUN cd voltron\
+    && uv sync 
 
 # Set up environment variables for AFLNet
 ENV WORKDIR="/home/ubuntu/experiments"
