@@ -3,50 +3,33 @@
 #export NO_CACHE="--no-cache"
 #export MAKE_OPT="-j4"
 
-cd $PFBENCH
-cd subjects/DNS/Dnsmasq
-docker build . -t Dnsmsqs --build-arg MAKE_OPT $NO_CACHE
+# Build a docker image only if it does not already exist.
+# Arguments:
+#   $1: path to build context (relative to PFBENCH)
+#   $2: docker image tag
+build_if_missing() {
+  local ctx="$1"
+  local tag="$2"
 
-cd subjects/DTLS/TinyDTLS
-docker build . -t TinyDTLS-vol --build-arg MAKE_OPT $NO_CACHE
+  if docker image inspect "$tag" > /dev/null 2>&1; then
+    echo "docker image '$tag' already exists; skipping build"
+    return 0
+  fi
 
-cd subjects/SSH/OpenSSH
-docker build . -t OpenSSH --build-arg MAKE_OPT $NO_CACHE
+  echo "building $tag"
+  (cd "$PFBENCH" && cd "$ctx" && docker build . -t "$tag" --build-arg MAKE_OPT $NO_CACHE)
+}
 
-cd subjects/TLS/OpenSSL
-docker build . -t OpenSSL --build-arg MAKE_OPT $NO_CACHE
-
-cd subjects/FTP/LightFTP
-docker build . -t lightftp-vol --build-arg MAKE_OPT $NO_CACHE
-
-cd $PFBENCH
-cd subjects/FTP/BFTPD
-docker build . -t bftpd-vol --build-arg MAKE_OPT $NO_CACHE
-
-cd $PFBENCH
-cd subjects/FTP/ProFTPD
-docker build . -t proftpd-vol --build-arg MAKE_OPT $NO_CACHE
-
-cd $PFBENCH
-cd subjects/FTP/PureFTPD
-docker build . -t pure-ftpd-vol --build-arg MAKE_OPT $NO_CACHE
-
-cd $PFBENCH
-cd subjects/SMTP/Exim
-docker build . -t exim-vol --build-arg MAKE_OPT $NO_CACHE
-
-cd $PFBENCH
-cd subjects/RTSP/Live555
-docker build . -t live555-vol --build-arg MAKE_OPT $NO_CACHE
-
-cd $PFBENCH
-cd subjects/SIP/Kamailio
-docker build . -t kamailio-vol --build-arg MAKE_OPT $NO_CACHE
-
-cd $PFBENCH
-cd subjects/DAAP/forked-daapd
-docker build . -t forked-daapd-vol --build-arg MAKE_OPT $NO_CACHE
-
-cd $PFBENCH
-cd subjects/HTTP/Lighttpd1
-docker build . -t lighttpd1-vol --build-arg MAKE_OPT $NO_CACHE
+build_if_missing "subjects/DNS/Dnsmasq" dnsmasq-vol
+build_if_missing "subjects/DTLS/TinyDTLS" tinydtls-vol
+build_if_missing "subjects/SSH/OpenSSH" openssh-vol
+build_if_missing "subjects/TLS/OpenSSL" openssl-vol
+build_if_missing "subjects/FTP/LightFTP" lightftp-vol
+build_if_missing "subjects/FTP/BFTPD" bftpd-vol
+build_if_missing "subjects/FTP/ProFTPD" proftpd-vol
+build_if_missing "subjects/FTP/PureFTPD" pure-ftpd-vol
+build_if_missing "subjects/SMTP/Exim" exim-vol
+build_if_missing "subjects/RTSP/Live555" live555-vol
+build_if_missing "subjects/SIP/Kamailio" kamailio-vol
+build_if_missing "subjects/DAAP/forked-daapd" forked-daapd-vol
+build_if_missing "subjects/HTTP/Lighttpd1" lighttpd1-vol
