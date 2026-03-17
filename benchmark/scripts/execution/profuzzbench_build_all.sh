@@ -5,17 +5,21 @@
 
 cd $PFBENCH
 cd subjects/DNS/Dnsmasq
-docker build . -t Dnsmsqs --build-arg MAKE_OPT $NO_CACHE
+docker build . -t dnsmasq-vol --build-arg MAKE_OPT $NO_CACHE
 
+cd $PFBENCH
 cd subjects/DTLS/TinyDTLS
-docker build . -t TinyDTLS-vol --build-arg MAKE_OPT $NO_CACHE
+docker build . -t tiny-dtls-vol --build-arg MAKE_OPT $NO_CACHE
 
+cd $PFBENCH
 cd subjects/SSH/OpenSSH
-docker build . -t OpenSSH --build-arg MAKE_OPT $NO_CACHE
+docker build . -t openssh-vol--build-arg MAKE_OPT $NO_CACHE
 
+cd $PFBENCH
 cd subjects/TLS/OpenSSL
-docker build . -t OpenSSL --build-arg MAKE_OPT $NO_CACHE
+docker build . -t openssl-vol --build-arg MAKE_OPT $NO_CACHE
 
+cd $PFBENCH
 cd subjects/FTP/LightFTP
 docker build . -t lightftp-vol --build-arg MAKE_OPT $NO_CACHE
 
