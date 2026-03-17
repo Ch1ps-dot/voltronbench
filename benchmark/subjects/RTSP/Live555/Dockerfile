@@ -55,6 +55,7 @@ RUN cd chatafl && \
     cd llvm_mode && make $MAKE_OPT
 
 COPY --chown=ubuntu:ubuntu voltron voltron
+RUN wget -qO- https://astral.sh/uv/install.sh | sh
 RUN cd voltron && \
     . $HOME/.local/bin/env && uv sync 
 
@@ -75,7 +76,7 @@ COPY --chown=ubuntu:ubuntu gcov.patch ${WORKDIR}/gcov.patch
 COPY --chown=ubuntu:ubuntu live.2023.05.10.tar.gz ${WORKDIR}/live.2023.05.10.tar.gz
 
 # Set up environment variables for ASAN
-env ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_after_return=1:detect_container_overflow=0:poison_array_cookie=0:malloc_fill_byte=0:max_malloc_fill_size=16777216'
+ENV ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_after_return=1:detect_container_overflow=0:poison_array_cookie=0:malloc_fill_byte=0:max_malloc_fill_size=16777216'
 
 # Download and compile Live555 for fuzzing
 RUN cd $WORKDIR && \
