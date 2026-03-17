@@ -25,6 +25,12 @@ RUN apt-get -y update && \
     libpcre2-8-0 \
     libcurl4-openssl-dev \
     libjson-c-dev \
+<<<<<<< HEAD
+    pkg-config \
+    zlib1g-dev \
+    automake libtool m4 \
+=======
+>>>>>>> 8f3d7377e47d301134c3ce8a246e36d77229b402
     wget
 
 # Add a new user ubuntu, pass: ubuntu
@@ -56,7 +62,11 @@ RUN cd chatafl && \
 COPY --chown=ubuntu:ubuntu voltron voltron
 RUN wget -qO- https://astral.sh/uv/install.sh | sh
 RUN cd voltron && \
+<<<<<<< HEAD
+    . $HOME/.local/bin/env && uv sync
+=======
     . $HOME/.local/bin/env && uv sync 
+>>>>>>> 8f3d7377e47d301134c3ce8a246e36d77229b402
 
 # Set up environment variables for AFLNet
 ENV WORKDIR="/home/ubuntu/experiments"

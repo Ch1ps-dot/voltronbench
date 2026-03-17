@@ -43,22 +43,12 @@ do
 
             if [[ $FUZZER == "aflnet" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh dnsmasq $NUM_CONTAINERS results-dnsmasq aflnet out-dnsmasq-aflnet "-P DNS -D 10000 -K" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh dnsmasq-vol $NUM_CONTAINERS results-dnsmasq aflnet out-dnsmasq-aflnet "-P DNS -D 10000 -K" $TIMEOUT $SKIPCOUNT &
             fi
 
             if [[ $FUZZER == "chatafl" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh dnsmasq $NUM_CONTAINERS results-dnsmasq chatafl out-dnsmasq-chatafl "-P DNS -D 10000 -K" $TIMEOUT $SKIPCOUNT &
-            fi
-
-            if [[ $FUZZER == "chatafl-cl1" ]] || [[ $FUZZER == "all" ]]
-            then
-                profuzzbench_exec_common.sh dnsmasq $NUM_CONTAINERS results-dnsmasq chatafl-cl1 out-dnsmasq-chatafl_cl1 "-P DNS -D 10000 -K" $TIMEOUT $SKIPCOUNT &
-            fi
-
-            if [[ $FUZZER == "chatafl-cl2" ]] || [[ $FUZZER == "all" ]]
-            then
-                profuzzbench_exec_common.sh dnsmasq $NUM_CONTAINERS results-dnsmasq chatafl-cl2 out-dnsmasq-chatafl_cl2 "-P DNS -D 10000 -K" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh dnsmasq-vol $NUM_CONTAINERS results-dnsmasq chatafl out-dnsmasq-chatafl "-P DNS -D 10000 -K" $TIMEOUT $SKIPCOUNT &
             fi
 
         fi
@@ -73,22 +63,12 @@ do
 
             if [[ $FUZZER == "aflnet" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh tinydtls $NUM_CONTAINERS results-tinydtls aflnet out-tinydtls-aflnet "-P DTLS12 -D 10000 -q 3 -s 3 -E -K -W 30" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh tinydtls-vol $NUM_CONTAINERS results-tinydtls aflnet out-tinydtls-aflnet "-P DTLS12 -D 10000 -q 3 -s 3 -E -K -W 30" $TIMEOUT $SKIPCOUNT &
             fi
 
             if [[ $FUZZER == "chatafl" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh tinydtls $NUM_CONTAINERS results-tinydtls chatafl out-tinydtls-chatafl "-P DTLS12 -D 10000 -q 3 -s 3 -E -K -W 30" $TIMEOUT $SKIPCOUNT &
-            fi
-
-            if [[ $FUZZER == "chatafl-cl1" ]] || [[ $FUZZER == "all" ]]
-            then
-                profuzzbench_exec_common.sh tinydtls $NUM_CONTAINERS results-tinydtls chatafl-cl1 out-tinydtls-chatafl_cl1 "-P DTLS12 -D 10000 -q 3 -s 3 -E -K -W 30" $TIMEOUT $SKIPCOUNT &
-            fi
-
-            if [[ $FUZZER == "chatafl-cl2" ]] || [[ $FUZZER == "all" ]]
-            then
-                profuzzbench_exec_common.sh tinydtls $NUM_CONTAINERS results-tinydtls chatafl-cl2 out-tinydtls-chatafl_cl2 "-P DTLS12 -D 10000 -q 3 -s 3 -E -K -W 30" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh tinydtls-vol $NUM_CONTAINERS results-tinydtls chatafl out-tinydtls-chatafl "-P DTLS12 -D 10000 -q 3 -s 3 -E -K -W 30" $TIMEOUT $SKIPCOUNT &
             fi
 
         fi
@@ -103,22 +83,12 @@ do
 
             if [[ $FUZZER == "aflnet" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh openssh $NUM_CONTAINERS results-openssh aflnet out-openssh-aflnet "-P SSH -D 10000 -q 3 -s 3 -E -K -W 10" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh openssh-vol $NUM_CONTAINERS results-openssh aflnet out-openssh-aflnet "-P SSH -D 10000 -q 3 -s 3 -E -K -W 10" $TIMEOUT $SKIPCOUNT &
             fi
 
             if [[ $FUZZER == "chatafl" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh openssh $NUM_CONTAINERS results-openssh chatafl out-openssh-chatafl "-P SSH -D 10000 -q 3 -s 3 -E -K -W 10" $TIMEOUT $SKIPCOUNT &
-            fi
-
-            if [[ $FUZZER == "chatafl-cl1" ]] || [[ $FUZZER == "all" ]]
-            then
-                profuzzbench_exec_common.sh openssh $NUM_CONTAINERS results-openssh chatafl-cl1 out-openssh-chatafl_cl1 "-P SSH -D 10000 -q 3 -s 3 -E -K -W 10" $TIMEOUT $SKIPCOUNT &
-            fi
-
-            if [[ $FUZZER == "chatafl-cl2" ]] || [[ $FUZZER == "all" ]]
-            then
-                profuzzbench_exec_common.sh openssh $NUM_CONTAINERS results-openssh chatafl-cl2 out-openssh-chatafl_cl2 "-P SSH -D 10000 -q 3 -s 3 -E -K -W 10" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh openssh-vol $NUM_CONTAINERS results-openssh chatafl out-openssh-chatafl "-P SSH -D 10000 -q 3 -s 3 -E -K -W 10" $TIMEOUT $SKIPCOUNT &
             fi
 
         fi
@@ -133,22 +103,12 @@ do
 
             if [[ $FUZZER == "aflnet" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh openssl $NUM_CONTAINERS results-openssl aflnet out-openssl-aflnet "-P TLS -D 10000 -q 3 -s 3 -E -K -R -W 100" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh openssl-vol $NUM_CONTAINERS results-openssl aflnet out-openssl-aflnet "-P TLS -D 10000 -q 3 -s 3 -E -K -R -W 100" $TIMEOUT $SKIPCOUNT &
             fi
 
             if [[ $FUZZER == "chatafl" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh openssl $NUM_CONTAINERS results-openssl chatafl out-openssl-chatafl "-P TLS -D 10000 -q 3 -s 3 -E -K -R -W 100" $TIMEOUT $SKIPCOUNT &
-            fi
-
-            if [[ $FUZZER == "chatafl-cl1" ]] || [[ $FUZZER == "all" ]]
-            then
-                profuzzbench_exec_common.sh openssl $NUM_CONTAINERS results-openssl chatafl-cl1 out-openssl-chatafl_cl1 "-P TLS -D 10000 -q 3 -s 3 -E -K -R -W 100" $TIMEOUT $SKIPCOUNT &
-            fi
-
-            if [[ $FUZZER == "chatafl-cl2" ]] || [[ $FUZZER == "all" ]]
-            then
-                profuzzbench_exec_common.sh openssl $NUM_CONTAINERS results-openssl chatafl-cl2 out-openssl-chatafl_cl2 "-P TLS -D 10000 -q 3 -s 3 -E -K -R -W 100" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh openssl-vol $NUM_CONTAINERS results-openssl chatafl out-openssl-chatafl "-P TLS -D 10000 -q 3 -s 3 -E -K -R -W 100" $TIMEOUT $SKIPCOUNT &
             fi
 
         fi
@@ -241,12 +201,12 @@ do
 
             if [[ $FUZZER == "aflnet" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh exim $NUM_CONTAINERS results-exim aflnet out-exim-aflnet "-P SMTP -D 10000 -q 3 -s 3 -E -K -W 100 -m none -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh exim-vol $NUM_CONTAINERS results-exim aflnet out-exim-aflnet "-P SMTP -D 10000 -q 3 -s 3 -E -K -W 100 -m none -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
             fi
 
             if [[ $FUZZER == "chatafl" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh exim $NUM_CONTAINERS results-exim chatafl out-exim-chatafl "-P SMTP -D 10000 -q 3 -s 3 -E -K -W 100 -m none -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh exim-vol $NUM_CONTAINERS results-exim chatafl out-exim-chatafl "-P SMTP -D 10000 -q 3 -s 3 -E -K -W 100 -m none -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
             fi
 
         fi
@@ -262,12 +222,12 @@ do
 
             if [[ $FUZZER == "aflnet" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh live555 $NUM_CONTAINERS results-live555 aflnet out-live555-aflnet "-P RTSP -D 10000 -q 3 -s 3 -E -K -R -m none" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh live555-vol $NUM_CONTAINERS results-live555 aflnet out-live555-aflnet "-P RTSP -D 10000 -q 3 -s 3 -E -K -R -m none" $TIMEOUT $SKIPCOUNT &
             fi
 
             if [[ $FUZZER == "chatafl" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh live555 $NUM_CONTAINERS results-live555 chatafl out-live555-chatafl "-P RTSP -D 10000 -q 3 -s 3 -E -K -R -m none" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh live555-vol $NUM_CONTAINERS results-live555 chatafl out-live555-chatafl "-P RTSP -D 10000 -q 3 -s 3 -E -K -R -m none" $TIMEOUT $SKIPCOUNT &
             fi
 
         fi
@@ -283,12 +243,12 @@ do
 
             if [[ $FUZZER == "aflnet" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh kamailio $NUM_CONTAINERS results-kamailio aflnet out-kamailio-aflnet "-m none -P SIP -l 5061 -D 50000 -q 3 -s 3 -E -K -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh kamailio-vol $NUM_CONTAINERS results-kamailio aflnet out-kamailio-aflnet "-m none -P SIP -l 5061 -D 50000 -q 3 -s 3 -E -K -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
             fi
             
             if [[ $FUZZER == "chatafl" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh kamailio $NUM_CONTAINERS results-kamailio chatafl out-kamailio-chatafl "-m none -P SIP -l 5061 -D 50000 -q 3 -s 3 -E -K -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh kamailio-vol $NUM_CONTAINERS results-kamailio chatafl out-kamailio-chatafl "-m none -P SIP -l 5061 -D 50000 -q 3 -s 3 -E -K -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
             fi
 
         fi
@@ -303,12 +263,12 @@ do
 
             if [[ $FUZZER == "aflnet" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh forked-daapd $NUM_CONTAINERS results-forked-daapd aflnet out-forked-daapd-aflnet "-P HTTP -D 200000 -m none -q 3 -s 3 -E -K -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh forked-daapd-vol $NUM_CONTAINERS results-forked-daapd aflnet out-forked-daapd-aflnet "-P HTTP -D 200000 -m none -q 3 -s 3 -E -K -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
             fi
 
             if [[ $FUZZER == "chatafl" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh forked-daapd $NUM_CONTAINERS results-forked-daapd chatafl out-forked-daapd-chatafl "-P HTTP -D 200000 -m none -q 3 -s 3 -E -K -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh forked-daapd-vol $NUM_CONTAINERS results-forked-daapd chatafl out-forked-daapd-chatafl "-P HTTP -D 200000 -m none -q 3 -s 3 -E -K -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
             fi
 
         fi
@@ -323,12 +283,12 @@ do
 
             if [[ $FUZZER == "aflnet" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh lighttpd1 $NUM_CONTAINERS results-lighttpd1 aflnet out-lighttpd1-aflnet "-P HTTP -D 200000 -m none -q 3 -s 3 -E -K -R -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh lighttpd1-vol $NUM_CONTAINERS results-lighttpd1 aflnet out-lighttpd1-aflnet "-P HTTP -D 200000 -m none -q 3 -s 3 -E -K -R -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
             fi
 
             if [[ $FUZZER == "chatafl" ]] || [[ $FUZZER == "all" ]]
             then
-                profuzzbench_exec_common.sh lighttpd1 $NUM_CONTAINERS results-lighttpd1 chatafl out-lighttpd1-chatafl "-P HTTP -D 200000 -m none -q 3 -s 3 -E -K -R -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
+                profuzzbench_exec_common.sh lighttpd1-vol $NUM_CONTAINERS results-lighttpd1 chatafl out-lighttpd1-chatafl "-P HTTP -D 200000 -m none -q 3 -s 3 -E -K -R -t ${TEST_TIMEOUT}+" $TIMEOUT $SKIPCOUNT &
             fi
 
         fi

@@ -1,5 +1,5 @@
 #!/bin/bash
-subjects=(lightftp-vol bftpd-vol proftpd-vol pure-ftpd-vol exim-vol live555-vol kamailio-vol forked-daapd-vol lighttpd1-vol )
+subjects=(lightftp-vol bftpd-vol proftpd-vol pure-ftpd-vol exim-vol live555-vol kamailio-vol forked-daapd-vol lighttpd1-vol dnsmasq-vol tinydtls-vol openssh-vol openssl-vol)
 for subject in ${subjects[@]};
 do
     # Delete All containers based on the image
