@@ -12,7 +12,6 @@ RUN apt-get -y update && \
     git \
     autoconf \
     libgnutls28-dev \
-    libssl-dev \
     llvm \
     python3-pip \
     nano \
@@ -21,6 +20,11 @@ RUN apt-get -y update && \
     gdb \
     netcat \
     strace \
+    libcap-dev \
+    libpcre2-dev \
+    libpcre2-8-0 \
+    libcurl4-openssl-dev \
+    libjson-c-dev \
     wget
 
 # Add a new user ubuntu, pass: ubuntu
@@ -50,9 +54,9 @@ RUN cd chatafl && \
     cd llvm_mode && make $MAKE_OPT
 
 COPY --chown=ubuntu:ubuntu voltron voltron
+RUN wget -qO- https://astral.sh/uv/install.sh | sh
 RUN cd voltron && \
-    . $HOME/.local/bin/env && uv sync  
-
+    . $HOME/.local/bin/env && uv sync 
 # Set up environment variables for AFLNet
 ENV WORKDIR="/home/ubuntu/experiments"
 ENV AFLNET="/home/ubuntu/aflnet"
@@ -73,7 +77,7 @@ COPY --chown=ubuntu:ubuntu rand.patch ${WORKDIR}/rand.patch
 COPY --chown=ubuntu:ubuntu rand.inc ${WORKDIR}/rand.inc
 
 # Set up environment variables for ASAN
-env ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_after_return=1:detect_container_overflow=0:poison_array_cookie=0:malloc_fill_byte=0:max_malloc_fill_size=16777216'
+ENV ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_after_return=1:detect_container_overflow=0:poison_array_cookie=0:malloc_fill_byte=0:max_malloc_fill_size=16777216'
 
 
 # Download and compile OpenSSL 1.0.2
