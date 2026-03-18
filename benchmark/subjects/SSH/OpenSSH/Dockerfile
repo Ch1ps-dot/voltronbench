@@ -57,8 +57,9 @@ RUN cd chatafl && \
     cd llvm_mode && make $MAKE_OPT
 
 COPY --chown=ubuntu:ubuntu voltron voltron
-RUN wget -qO- https://astral.sh/uv/install.sh | sh
+RUN pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple
 ENV PATH="/home/ubuntu/.local/bin:$PATH"
+ENV UV_PYTHON_INSTALL_MIRROR=https://mirrors.ustc.edu.cn/github-release/astral-sh/python-build-standalone/
 RUN cd voltron && \
     uv sync 
     
@@ -90,7 +91,7 @@ ENV ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_a
 RUN cd ${WORKDIR} && \
     git clone https://github.com/openssl/openssl openssl && \
     cd openssl && \
-    git checkout 12ad22d && \
+    git checkout 12ad22dd16 && \
     ./Configure linux-x86_64-clang shared --prefix=$WORKDIR/openssl-install && \
     make $MAKE_OPT && \
     make install
@@ -100,6 +101,7 @@ ENV LD_LIBRARY_PATH="${WORKDIR}/openssl-install/lib"
 # Download and compile OpenSSH for fuzzing
 RUN cd ${WORKDIR} && \
     git clone https://github.com/vegard/openssh-portable.git openssh && \
+    cp -r openssh openssh-gcov && \
     cd openssh && \
     git checkout 7cfea58 && \
     cp ${WORKDIR}/rand.inc . && \
@@ -119,7 +121,6 @@ RUN cd ${WORKDIR} && \
 
 # Download and compile OpenSSH for coverage analysis
 RUN cd ${WORKDIR} && \
-    git clone https://github.com/vegard/openssh-portable.git openssh-gcov && \
     cd openssh-gcov && \
     git checkout 7cfea58 && \
     cp ${WORKDIR}/rand.inc . && \
