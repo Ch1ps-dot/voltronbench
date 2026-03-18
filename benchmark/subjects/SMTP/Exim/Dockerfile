@@ -55,7 +55,7 @@ RUN cd chatafl && \
     cd llvm_mode && make $MAKE_OPT
 
 COPY --chown=ubuntu:ubuntu voltron voltron
-RUN wget -qO- https://astral.sh/uv/install.sh | sh
+RUN pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple
 ENV PATH="/home/ubuntu/.local/bin:$PATH"
 RUN cd voltron && \
     uv sync 
