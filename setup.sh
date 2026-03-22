@@ -1,7 +1,8 @@
 #!/bin/bash
 
+# llm model settings for ChatAFL
 MODEL="gpt-4-turbo"
-URL="https:\/\/xiaoai.plus\/v1"
+URL="https:\/\/xiaoai.plus\/v1\/chat\/completions" # dont forget to escape the slashes
 KEY="sk-vUIK7aS2md6wOsKyEsEEDzzDYNu5BwwaQ9UofpG9N7XB6egQ"
 
 # Update the openAI key
