@@ -53,6 +53,26 @@ do
 
         fi
 
+##### DCMTK #####
+
+        if [[ $TARGET == "dcmtk" ]] || [[ $TARGET == "all" ]]
+        then
+
+            cd $PFBENCH
+            mkdir results-dcmtk
+
+            if [[ $FUZZER == "aflnet" ]] || [[ $FUZZER == "all" ]]
+            then
+                profuzzbench_exec_common.sh dcmtk-vol $NUM_CONTAINERS results-dcmtk aflnet out-dcmtk-aflnet "-P DICOM -D 10000 -E -K -m none" $TIMEOUT $SKIPCOUNT &
+            fi
+
+            if [[ $FUZZER == "chatafl" ]] || [[ $FUZZER == "all" ]]
+            then
+                profuzzbench_exec_common.sh dcmtk-vol $NUM_CONTAINERS results-dcmtk chatafl out-dcmtk-chatafl "-P DICOM -D 10000 -E -K -m none" $TIMEOUT $SKIPCOUNT &
+            fi
+
+        fi
+
 ##### DTLS #####
 
         if [[ $TARGET == "tinydtls" ]] || [[ $TARGET == "all" ]]

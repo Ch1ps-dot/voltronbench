@@ -33,3 +33,4 @@ build_if_missing "subjects/RTSP/Live555" live555-vol
 build_if_missing "subjects/SIP/Kamailio" kamailio-vol
 build_if_missing "subjects/DAAP/forked-daapd" forked-daapd-vol
 build_if_missing "subjects/HTTP/Lighttpd1" lighttpd1-vol
+build_if_missing "subjects/DICOM/Dcmtk" dcmtk-vol
