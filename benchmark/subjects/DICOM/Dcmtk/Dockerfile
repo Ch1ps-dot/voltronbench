@@ -12,7 +12,6 @@ RUN apt-get -y update && \
     git \
     autoconf \
     libgnutls28-dev \
-    libssl-dev \
     llvm \
     python3-pip \
     nano \
@@ -21,6 +20,14 @@ RUN apt-get -y update && \
     gdb \
     netcat \
     strace \
+    libcap-dev \
+    libpcre2-dev \
+    libpcre2-8-0 \
+    libcurl4-openssl-dev \
+    libjson-c-dev \
+    pkg-config \
+    zlib1g-dev \
+    automake libtool m4 \
     wget
 
 # Add a new user ubuntu, pass: ubuntu
@@ -39,15 +46,22 @@ WORKDIR /home/ubuntu
 ARG MAKE_OPT
 
 # Set up fuzzers
-RUN git clone https://github.com/profuzzbench/aflnet.git && \
-    cd aflnet && \
+COPY --chown=ubuntu:ubuntu aflnet aflnet
+RUN cd aflnet && \
     make clean all $MAKE_OPT && \
     cd llvm_mode && make $MAKE_OPT
 
-RUN git clone https://github.com/profuzzbench/aflnwe.git && \
-    cd aflnwe && \
+COPY --chown=ubuntu:ubuntu chatafl chatafl
+RUN cd chatafl && \
     make clean all $MAKE_OPT && \
     cd llvm_mode && make $MAKE_OPT
+
+COPY --chown=ubuntu:ubuntu voltron voltron
+RUN pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple
+ENV PATH="/home/ubuntu/.local/bin:$PATH"
+ENV UV_PYTHON_INSTALL_MIRROR=https://mirrors.ustc.edu.cn/github-release/astral-sh/python-build-standalone/
+RUN cd voltron && \
+    uv sync 
 
 # Set up environment variables for AFLNet
 ENV WORKDIR="/home/ubuntu/experiments"
