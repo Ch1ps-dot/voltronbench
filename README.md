@@ -53,10 +53,12 @@ year={2024},}
 Run the following command to set up all docker images, including the subjects with all fuzzers:
 
 ```bash
-KEY=<OPENAI_API_KEY> ./setup.sh
+CHATAFL_API_KEY=... ./setup.sh
 ```
 
-The process is estimated to take about 40 minutes. OPENAI_API_KEY is your OpenAI key and please refer to [this](https://openai.com/) about how to obtain a key.
+The process is estimated to take about 40 minutes. ChatAFL currently embeds
+its API configuration at compile time, so its key is supplied during setup.
+Voltron receives its LLM credentials at runtime as shown below.
 
 ### 1.3. Running Experiments
 
@@ -67,6 +69,47 @@ Utilize the `run.sh` script to run experiments. The command is as follows:
 ```
 
 Where `container_number` specifies how many containers are created to run a single fuzzer on a particular subject (each container runs one fuzzer on one subject). `fuzzed_time` indicates the fuzzing time in minutes. `subjects` is the list of subjects under test, and `fuzzers` is the list of fuzzers that are utilized to fuzz subjects. For example, the command (`run.sh 1 5 pure-ftpd chatafl`) would create 1 container for the fuzzer ChatAFL to fuzz the subject pure-ftpd for 5 minutes. In a short cut, one can execute all fuzzers and all subjects by using the writing `all` in place of the subject and fuzzer list.
+
+Voltron is available as a third fuzzer for the targets configured by its
+current release:
+
+```bash
+./run.sh 1 30 lightftp voltron
+./run.sh 3 240 bftpd,proftpd,pure-ftpd aflnet,chatafl,voltron
+```
+
+The target images do not contain Voltron. When a Voltron experiment starts,
+the revision pinned in `voltron.version` is downloaded into `.runtime/`,
+mounted read-only into the container, and copied into the container's writable
+layer. To deliberately run another revision, no image rebuild is needed:
+
+```bash
+VOLTRON_REF=main VOLTRON_UPDATE=1 ./run.sh 1 30 lightftp voltron
+```
+
+Voltron's LLM configuration can be supplied at runtime without baking secrets
+into an image:
+
+```bash
+VOLTRON_LLM_BASE_URL=https://example.com/v1 \
+VOLTRON_LLM_API_KEY=... \
+VOLTRON_LLM_MODEL=... \
+./run.sh 1 30 lightftp voltron
+```
+
+The first Voltron run creates its Python environment inside the container.
+Downloaded Python and package artifacts are cached under
+`.runtime/voltron/uv-cache` and reused by later containers. For local Voltron
+development, bypass the Git snapshot cache with:
+
+```bash
+VOLTRON_SOURCE_DIR=/path/to/voltron ./run.sh 1 30 lightftp voltron
+```
+
+Voltron state data is adapted to ProFuzzBench's `nodes` and `edges` series
+using distinct response types and response transitions. Its replay-based code
+coverage remains experimental; runs without replay data are therefore omitted
+from code-coverage plots rather than assigned synthetic coverage values.
 
 When the script completes, in the `benchmark` directory a folder `result-<name of subject>` will be created, containing fuzzing results for each run.
 
@@ -141,7 +184,10 @@ Upon completion of the commands, a folder prefixed with `res_` will be generated
 
 ### 4.1. Enhancing or experimenting with ChatAFL
 
-If a modification is done to any of the fuzzers, re-executing `setup.sh` will rebuild all the images with the modified version. All provided versions of ChatAFL contain a Dockerfile, allowing for the checking of build failures in the same environment as the one for the subjects and having a clean image, where one can setup different subjects.
+Changes to AFLNet, ChatAFL, or a target require
+`FORCE_REBUILD=1 ./setup.sh`. Voltron changes only require selecting a new
+`VOLTRON_REF` or setting `VOLTRON_SOURCE_DIR`; the same target images are
+reused.
 
 ### 4.2. Tuning fuzzer parameters
 

@@ -14,7 +14,7 @@ Similarly 8000 is for the example request in the seed enrichment
 
 #define MODEL "gpt-4-turbo"
 #define URL "https://xiaoai.plus/v1/chat/completions"
-#define OPENAI_TOKEN "sk-vUIK7aS2md6wOsKyEsEEDzzDYNu5BwwaQ9UofpG9N7XB6egQ"
+#define OPENAI_TOKEN "<set-with-CHATAFL_API_KEY>"
 
 #define MAX_PROMPT_LENGTH 16384
 #define EXAMPLES_PROMPT_LENGTH 4000

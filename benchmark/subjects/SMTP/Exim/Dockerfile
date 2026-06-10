@@ -54,11 +54,10 @@ RUN cd chatafl && \
     make clean all $MAKE_OPT && \
     cd llvm_mode && make $MAKE_OPT
 
-COPY --chown=ubuntu:ubuntu voltron voltron
+# Voltron is mounted when a container starts; only install its generic runner.
 RUN pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple
 ENV PATH="/home/ubuntu/.local/bin:$PATH"
-RUN cd voltron && \
-    uv sync 
+ENV UV_PYTHON_INSTALL_MIRROR=https://mirrors.ustc.edu.cn/github-release/astral-sh/python-build-standalone/
 
 # Set up environment variables for AFLNet
 ENV WORKDIR="/home/ubuntu/experiments"

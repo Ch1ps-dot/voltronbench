@@ -1,41 +1,34 @@
 #!/bin/bash
 
-# llm model settings for ChatAFL
-MODEL="gpt-4-turbo"
-URL="https:\/\/xiaoai.plus\/v1\/chat\/completions" # dont forget to escape the slashes
-KEY="sk-vUIK7aS2md6wOsKyEsEEDzzDYNu5BwwaQ9UofpG9N7XB6egQ"
+set -euo pipefail
 
-# Update the openAI key
-for x in ChatAFL;
-do
-  sed -i "s/#define MODEL \".*\"/#define MODEL \"$MODEL\"/" $x/chat-llm.h
-  sed -i "s/#define URL \".*\"/#define URL \"$URL\"/" $x/chat-llm.h
-  sed -i "s/#define OPENAI_TOKEN \".*\"/#define OPENAI_TOKEN \"$KEY\"/" $x/chat-llm.h
-done
+ROOT=$(cd "$(dirname "$0")" && pwd)
+PFBENCH="$ROOT/benchmark"
+cd "$ROOT"
+
+# ChatAFL settings are optional and supplied by the environment.
+if [ -n "${CHATAFL_MODEL:-}" ]; then
+  sed -i "s/#define MODEL \".*\"/#define MODEL \"$CHATAFL_MODEL\"/" ChatAFL/chat-llm.h
+fi
+if [ -n "${CHATAFL_URL:-}" ]; then
+  sed -i "s|#define URL \".*\"|#define URL \"$CHATAFL_URL\"|" ChatAFL/chat-llm.h
+fi
+if [ -n "${CHATAFL_API_KEY:-}" ]; then
+  sed -i "s/#define OPENAI_TOKEN \".*\"/#define OPENAI_TOKEN \"$CHATAFL_API_KEY\"/" ChatAFL/chat-llm.h
+fi
 
 # Copy the different versions of ChatAFL to the benchmark directories
-for subject in ./benchmark/subjects/*/*; do
-  rm -r $subject/aflnet 2>&1 >/dev/null
-  cp -r aflnet $subject/aflnet
-
-  rm -r $subject/chatafl 2>&1 >/dev/null
-  cp -r ChatAFL $subject/chatafl
-
-  rm -r $subject/voltron 2>&1 >/dev/null
-  cp -r voltron $subject/voltron
-done;
+for subject in "$PFBENCH"/subjects/*/*; do
+  rm -rf "$subject/aflnet" "$subject/chatafl" "$subject/voltron"
+  cp -r "$ROOT/aflnet" "$subject/aflnet"
+  cp -r "$ROOT/ChatAFL" "$subject/chatafl"
+done
 
 # Build the docker images
 
-PFBENCH="$PWD/benchmark"
-cd $PFBENCH
-PFBENCH=$PFBENCH scripts/execution/profuzzbench_build_all.sh
+cd "$PFBENCH"
+PFBENCH="$PFBENCH" scripts/execution/profuzzbench_build_all.sh
 
-for subject in ./benchmark/subjects/*/*; do
-  rm -r $subject/aflnet 2>&1 >/dev/null
-
-  rm -r $subject/chatafl 2>&1 >/dev/null
-
-  rm -r $subject/voltron 2>&1 >/dev/null
-
-done;
+for subject in "$PFBENCH"/subjects/*/*; do
+  rm -rf "$subject/aflnet" "$subject/chatafl" "$subject/voltron"
+done

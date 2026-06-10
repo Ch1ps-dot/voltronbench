@@ -8,6 +8,49 @@ export TEST_TIMEOUT="${TEST_TIMEOUT:-20000}"
 export TARGET_LIST=$1
 export FUZZER_LIST=$2
 
+VOLTRON_TARGETS="dnsmasq tinydtls lightftp bftpd proftpd pure-ftpd exim live555 kamailio forked-daapd lighttpd1"
+
+run_voltron_target() {
+    local target=$1
+    local result_dir="results-${target}"
+    local out_dir="out-${target}-voltron"
+
+    mkdir -p "$PFBENCH/$result_dir"
+    "$PFBENCH/../run_voltron.sh" \
+        "${target}-vol" \
+        "$NUM_CONTAINERS" \
+        "$PFBENCH/$result_dir" \
+        "$target" \
+        "$out_dir" \
+        "$TIMEOUT" \
+        "$SKIPCOUNT" &
+}
+
+run_requested_voltron_targets() {
+    local target=$1
+    local supported
+
+    if [[ "$FUZZER" != "voltron" && "$FUZZER" != "all" ]]; then
+        return
+    fi
+
+    if [[ "$target" == "all" ]]; then
+        for supported in $VOLTRON_TARGETS; do
+            run_voltron_target "$supported"
+        done
+        return
+    fi
+
+    for supported in $VOLTRON_TARGETS; do
+        if [[ "$target" == "$supported" ]]; then
+            run_voltron_target "$target"
+            return
+        fi
+    done
+
+    echo "VOLTRON: target '$target' is not configured in the current Voltron release; skipping."
+}
+
 if [[ "x$TARGET_LIST" == "x" ]] || [[ "x$FUZZER_LIST" == "x" ]]
 then
     echo "Usage: $0 TARGET FUZZER"
@@ -32,6 +75,8 @@ do
         echo
         echo "***** RUNNING $FUZZER ON $TARGET *****"
         echo
+
+        run_requested_voltron_targets "$TARGET"
 
 ##### DNS #####
 
@@ -317,9 +362,11 @@ do
         if [[ $TARGET == "all" ]]
         then
             # Quit loop -- all fuzzers and targets have already been executed
+            wait
             exit
         fi
 
     done
 done
 
+wait

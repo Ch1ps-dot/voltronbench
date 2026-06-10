@@ -61,19 +61,20 @@ def main(csv_file, put, runs, cut_off, step, out_file, fuzzers):
 
   for key, grp in mean_df.groupby(['fuzzer', 'data_type']):
     if key[1] == 'nodes':
-      axes[0].plot(grp['time'], grp['data'])
+      axes[0].plot(grp['time'], grp['data'], label=key[0])
       #axes[0].set_title('Edge coverage over time (#edges)')
       axes[0].set_xlabel('Time (in min)')
       axes[0].set_ylabel('#nodes')
     if key[1] == 'edges':
-      axes[1].plot(grp['time'], grp['data'])
+      axes[1].plot(grp['time'], grp['data'], label=key[0])
       #axes[1].set_title('Edge coverage over time (%)')
       axes[1].set_ylim([0,100])
       axes[1].set_xlabel('Time (in min)')
       axes[1].set_ylabel('#edges')
 
   for i, ax in enumerate(fig.axes):
-    ax.legend(fuzzers, loc='upper left')
+    if ax.lines:
+      ax.legend(loc='upper left')
     ax.grid()
 
   #Save to file

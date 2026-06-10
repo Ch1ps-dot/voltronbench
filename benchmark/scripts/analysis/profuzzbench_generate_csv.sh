@@ -82,7 +82,11 @@ for fuzzer in $fuzzers; do
     tar -axf out-${prog}-${fuzzer}_${i}.tar.gz out-${prog}-${fuzzer}/plot_data
     mv out-${prog}-${fuzzer} out-${prog}-${fuzzer}-${i}
     #combine all csv files
-    convert $fuzzer $prog $i out-${prog}-${fuzzer}-${i}/cov_over_time.csv $covfile
-    convert_state $fuzzer $prog $i out-${prog}-${fuzzer}-${i}/plot_data $states_data
+    if [ -s out-${prog}-${fuzzer}-${i}/cov_over_time.csv ]; then
+      convert $fuzzer $prog $i out-${prog}-${fuzzer}-${i}/cov_over_time.csv $covfile
+    fi
+    if [ -s out-${prog}-${fuzzer}-${i}/plot_data ]; then
+      convert_state $fuzzer $prog $i out-${prog}-${fuzzer}-${i}/plot_data $states_data
+    fi
   done 
 done

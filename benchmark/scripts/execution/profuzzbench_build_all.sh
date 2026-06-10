@@ -11,7 +11,7 @@ build_if_missing() {
   local ctx="$1"
   local tag="$2"
 
-  if docker image inspect "$tag" > /dev/null 2>&1; then
+  if [[ -z "${FORCE_REBUILD:-}" ]] && docker image inspect "$tag" > /dev/null 2>&1; then
     echo "docker image '$tag' already exists; skipping build"
     return 0
   fi
