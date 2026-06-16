@@ -133,6 +133,15 @@ When the evaluation of the artifact is completed, running the `clean.sh` script 
 ./clean.sh
 ```
 
+To remove all Docker images built by this benchmark project, run:
+
+```bash
+./clean_images.sh
+```
+
+Use `./clean_images.sh --dry-run` to preview the containers and images that
+would be removed.
+
 ## 2. Functional Analysis
 
 ### 2.1. Examining LLM-generated Grammars

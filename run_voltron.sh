@@ -12,11 +12,50 @@ SKIPCOUNT=${7:-1}
 DELETE=${8:-}
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
-VOLTRON_SOURCE=$("$ROOT/scripts/prepare_voltron.sh")
-UV_CACHE=${VOLTRON_UV_CACHE_DIR:-"$ROOT/.runtime/voltron/uv-cache"}
+source "$ROOT/benchmark/scripts/execution/profuzzbench_monitor_common.sh"
 
 cids=()
+MONITOR_PID=""
+LABEL="voltron on ${DOCIMAGE}"
+PROFUZZBENCH_RUN_START_EPOCH=$(date +%s)
 mkdir -p "$SAVETO"
+
+collect_results() {
+  local index=1
+  local id
+
+  printf "\nVOLTRON: Collecting results and saving them to %s" "$SAVETO"
+  for id in "${cids[@]}"; do
+    printf "\nVOLTRON: Collecting results from container %s" "$id"
+    if ! docker cp \
+      "${id}:/home/ubuntu/voltron-runtime/${OUTDIR}.tar.gz" \
+      "${SAVETO}/${OUTDIR}_${index}.tar.gz" > /dev/null 2>&1; then
+      printf "\nVOLTRON: No archive available from container %s" "$id"
+    fi
+    if [ -n "$DELETE" ]; then
+      docker rm "$id" > /dev/null 2>&1 || true
+    fi
+    index=$((index + 1))
+  done
+}
+
+handle_interrupt() {
+  trap - INT TERM
+  printf "\nVOLTRON: Interrupt received. Cleaning up...\n"
+  profuzzbench_stop_monitor "$MONITOR_PID"
+  profuzzbench_interrupt_containers "${cids[@]}"
+  profuzzbench_print_final_container_summary "$LABEL" "$TIMEOUT" "${cids[@]}"
+  if [ "$PROFUZZBENCH_COLLECT_ON_INTERRUPT" = "1" ]; then
+    collect_results
+  fi
+  printf "\nVOLTRON: Interrupted. Exiting with status 130.\n"
+  exit 130
+}
+
+trap handle_interrupt INT TERM
+
+VOLTRON_SOURCE=$("$ROOT/scripts/prepare_voltron.sh")
+UV_CACHE=${VOLTRON_UV_CACHE_DIR:-"$ROOT/.runtime/voltron/uv-cache"}
 mkdir -p "$UV_CACHE"
 chmod 0777 "$UV_CACHE"
 
@@ -42,19 +81,14 @@ done
 
 printf "\nVOLTRON: Fuzzing in progress ..."
 printf "\nVOLTRON: Waiting for the following containers to stop: %s" "${cids[*]}"
+if [ "$PROFUZZBENCH_MONITOR" != "0" ]; then
+  profuzzbench_monitor_containers "$LABEL" "$TIMEOUT" "${cids[@]}" &
+  MONITOR_PID=$!
+fi
 docker wait "${cids[@]}" > /dev/null
+profuzzbench_stop_monitor "$MONITOR_PID"
+profuzzbench_print_final_container_summary "$LABEL" "$TIMEOUT" "${cids[@]}"
 
-printf "\nVOLTRON: Collecting results and saving them to %s" "$SAVETO"
-index=1
-for id in "${cids[@]}"; do
-  printf "\nVOLTRON: Collecting results from container %s" "$id"
-  docker cp \
-    "${id}:/home/ubuntu/voltron-runtime/${OUTDIR}.tar.gz" \
-    "${SAVETO}/${OUTDIR}_${index}.tar.gz" > /dev/null
-  if [ -n "$DELETE" ]; then
-    docker rm "$id" > /dev/null
-  fi
-  index=$((index + 1))
-done
+collect_results
 
 printf "\nVOLTRON: I am done!\n"
