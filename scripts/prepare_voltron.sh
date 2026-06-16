@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REPO=${VOLTRON_REPO:-https://github.com/Ch1ps-dot/voltron.git}
-REF=${VOLTRON_REF:-$(tr -d '[:space:]' < "$ROOT/voltron.version")}
+REF=${VOLTRON_REF:-main}
 CACHE_ROOT=${VOLTRON_CACHE_DIR:-"$ROOT/.runtime/voltron"}
 MIRROR="$CACHE_ROOT/repository.git"
 SNAPSHOTS="$CACHE_ROOT/snapshots"
@@ -24,7 +24,7 @@ flock 9
 
 if [ ! -d "$MIRROR" ]; then
   git clone --mirror "$REPO" "$MIRROR" >&2
-elif [[ ! "$REF" =~ ^[0-9a-fA-F]{40}$ ]] || [ -n "${VOLTRON_UPDATE:-}" ]; then
+else
   git --git-dir="$MIRROR" fetch --prune origin >&2
 fi
 

@@ -29,7 +29,7 @@ for i in $(seq 1 "$RUNS"); do
     -e UV_CACHE_DIR=/home/ubuntu/.cache/uv
     -e UV_PYTHON_INSTALL_DIR=/home/ubuntu/.cache/uv/python
   )
-  for env_name in VOLTRON_LLM_BASE_URL VOLTRON_LLM_API_KEY VOLTRON_LLM_MODEL VOLTRON_STATS_INTERVAL; do
+  for env_name in VOLTRON_LLM_BASE_URL VOLTRON_LLM_API_KEY VOLTRON_LLM_MODEL VOLTRON_STATS_INTERVAL VOLTRON_COMPLIANCE_ANALYZER; do
     if [ -n "${!env_name:-}" ]; then
       docker_args+=(-e "${env_name}=${!env_name}")
     fi

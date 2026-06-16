@@ -10,6 +10,7 @@ SKIPCOUNT=${4:-1}
 VOLTRON_SOURCE=${VOLTRON_SOURCE:-/opt/voltron-src}
 VOLTRON_DIR=${VOLTRON_DIR:-/home/ubuntu/voltron-runtime}
 STATS_INTERVAL=${VOLTRON_STATS_INTERVAL:-10}
+COMPLIANCE_ANALYZER=${VOLTRON_COMPLIANCE_ANALYZER:-analyze_compliance}
 TIMEOUT_MINUTES=$(( (TIMEOUT_SECONDS + 59) / 60 ))
 
 case "$TARGET" in
@@ -61,6 +62,17 @@ record_status() {
     "${chat_tokens:-0}" >> "$PLOT_DATA"
 }
 
+run_compliance_analysis() {
+  local log_file="$OUTDIR/analyze_compliance.log"
+
+  printf 'Running compliance analysis for %s with %s\n' \
+    "$VOLTRON_TARGET" "$COMPLIANCE_ANALYZER" | tee "$log_file"
+
+  uv run "$COMPLIANCE_ANALYZER" \
+    --sut "$VOLTRON_TARGET" \
+    --output "$OUTDIR" >> "$log_file" 2>&1
+}
+
 uv run cli.py \
   --sut "$VOLTRON_TARGET" \
   --algorithm state \
@@ -81,6 +93,9 @@ wait "$FUZZ_PID"
 STATUS=$?
 record_status
 
+run_compliance_analysis
+COMPLIANCE_STATUS=$?
+
 # Voltron's replay-based code coverage is still experimental. Keep the
 # ProFuzzBench file contract without inventing coverage measurements.
 if [ ! -f "$OUTDIR/cov_over_time.csv" ]; then
@@ -88,4 +103,7 @@ if [ ! -f "$OUTDIR/cov_over_time.csv" ]; then
 fi
 
 tar -zcf "${OUTDIR}.tar.gz" "$OUTDIR"
-exit "$STATUS"
+if [ "$STATUS" -ne 0 ]; then
+  exit "$STATUS"
+fi
+exit "$COMPLIANCE_STATUS"

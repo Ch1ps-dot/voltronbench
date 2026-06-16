@@ -79,12 +79,12 @@ current release:
 ```
 
 The target images do not contain Voltron. When a Voltron experiment starts,
-the revision pinned in `voltron.version` is downloaded into `.runtime/`,
-mounted read-only into the container, and copied into the container's writable
-layer. To deliberately run another revision, no image rebuild is needed:
+the latest `main` revision from GitHub is fetched into `.runtime/`, mounted
+read-only into the container, and copied into the container's writable layer.
+To deliberately run another revision, no image rebuild is needed:
 
 ```bash
-VOLTRON_REF=main VOLTRON_UPDATE=1 ./run.sh 1 30 lightftp voltron
+VOLTRON_REF=497d44fabbdd68b542b29ad2801e3a3734b57297 ./run.sh 1 30 lightftp voltron
 ```
 
 Voltron's LLM configuration can be supplied at runtime without baking secrets
