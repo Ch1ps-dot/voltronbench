@@ -13,6 +13,52 @@ The repository is intended to make comparative experiments easy to run:
 - collect ProFuzzBench-style archives and plots;
 - run Voltron's compliance analysis after each Voltron fuzzing task.
 
+## Quick Start
+
+The shortest path is to build the active benchmark images, run one small
+non-LLM experiment, and inspect the exported ProFuzzBench archive:
+
+```bash
+./deps.sh
+./setup.sh
+./run.sh 1 5 lightftp stateafl
+ls benchmark/results-lightftp/out-lightftp-stateafl_1.tar.gz
+```
+
+Run AFLNet or ChatAFL with the same entry point:
+
+```bash
+./run.sh 1 5 lightftp aflnet
+./run.sh 1 5 lightftp chatafl
+```
+
+Generate coverage and state plots from the exported archives:
+
+```bash
+./analyze.sh lightftp 5
+```
+
+To run several active targets and fuzzers together:
+
+```bash
+./run.sh 1 30 lightftp,bftpd,proftpd aflnet,chatafl,stateafl
+```
+
+Voltron runs use the same subject names and output layout, but require a local
+LLM profile in `config/voltron-llm.yaml`:
+
+```bash
+cp config/voltron-llm.example.yaml config/voltron-llm.yaml
+# Edit config/voltron-llm.yaml with your local API profile.
+./run.sh 1 30 lightftp voltron
+```
+
+All quick-start commands use the active target set only:
+
+```text
+live555 kamailio exim forked-daapd pure-ftpd proftpd bftpd lightftp lighttpd1
+```
+
 ## Repository Layout
 
 ```text
@@ -20,7 +66,7 @@ The repository is intended to make comparative experiments easy to run:
 ├── aflnet/                         # AFLNet source used by the benchmark images
 ├── ChatAFL/                        # ChatAFL source used by the benchmark images
 ├── benchmark/
-│   ├── subjects/                   # Protocol targets and Docker build contexts
+│   ├── subjects/                   # Active protocol targets and Docker build contexts
 │   └── scripts/
 │       ├── execution/              # Docker execution and monitoring scripts
 │       └── analysis/               # CSV generation and plotting scripts
@@ -73,6 +119,12 @@ The build script skips images that already exist. Force a rebuild with:
 FORCE_REBUILD=1 ./setup.sh
 ```
 
+The active benchmark set is intentionally limited to these nine targets:
+
+```text
+live555 kamailio exim forked-daapd pure-ftpd proftpd bftpd lightftp lighttpd1
+```
+
 The image tags built by the project are:
 
 ```text
@@ -81,7 +133,15 @@ proftpd-vol bftpd-vol lightftp-vol lighttpd1-vol
 ```
 
 Each target also has a StateAFL image named
-`<target>-stateafl-vol`, for example `lightftp-stateafl-vol`.
+`<target>-stateafl-vol`. The full StateAFL image set is:
+
+```text
+live555-stateafl-vol kamailio-stateafl-vol exim-stateafl-vol
+forked-daapd-stateafl-vol pure-ftpd-stateafl-vol proftpd-stateafl-vol
+bftpd-stateafl-vol lightftp-stateafl-vol lighttpd1-stateafl-vol
+```
+
+No other ProFuzzBench subjects are kept under `benchmark/subjects/`.
 
 ## Run Experiments
 
@@ -118,6 +178,13 @@ The script writes run archives under:
 benchmark/results-<subject>/out-<subject>-<fuzzer>_<run>.tar.gz
 ```
 
+This archive naming is shared by AFLNet, ChatAFL, StateAFL, and Voltron. For
+example, a single LightFTP StateAFL run writes:
+
+```text
+benchmark/results-lightftp/out-lightftp-stateafl_1.tar.gz
+```
+
 Containers are left in Docker after normal completion unless the lower-level
 runner is invoked with its optional delete argument. This is useful for
 post-mortem inspection with `docker logs` or `docker cp`.
@@ -139,6 +206,14 @@ Run it through the same entry point as AFLNet and ChatAFL:
 StateAFL uses replay-format seed corpora. The ProFuzzBench replay corpora are
 used where available; the Lighttpd image deterministically converts its HTTP
 seeds to replay format during the image build.
+
+StateAFL exports results through the same ProFuzzBench archive contract as
+AFLNet and ChatAFL. The common executor copies
+`/home/ubuntu/experiments/out-<target>-stateafl.tar.gz` from each container to
+`benchmark/results-<target>/out-<target>-stateafl_<run>.tar.gz`. Any files
+under the fuzzer output directory are preserved in the archive; the analysis
+pipeline specifically consumes `cov_over_time.csv` and `plot_data` when they
+are present.
 
 ## Voltron Integration
 
@@ -335,9 +410,15 @@ the artifacts to a timestamped directory in the repository root:
 res_<subject>_<timestamp>/
 ```
 
+Fuzzer names are discovered from archive names such as
+`out-lightftp-aflnet_1.tar.gz`, `out-lightftp-chatafl_1.tar.gz`, and
+`out-lightftp-stateafl_1.tar.gz`, so StateAFL archives are analyzed alongside
+AFLNet and ChatAFL when the expected `cov_over_time.csv` and `plot_data` files
+exist in the archive.
+
 ## Clean Up
 
-Remove benchmark images and containers for the original subject set:
+Remove benchmark images and containers for the active subject set:
 
 ```bash
 ./clean.sh
