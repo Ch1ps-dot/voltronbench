@@ -1,242 +1,436 @@
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10115151.svg)](https://doi.org/10.5281/zenodo.10115151)
+# VoltronBench
 
-# ChatAFL Artifact
+VoltronBench is a protocol-fuzzing benchmark harness built on top of
+ProFuzzBench and the ChatAFL artifact. It provides AFLNet, ChatAFL, StateAFL,
+and Voltron through one experiment flow against the same Dockerized protocol
+targets.
 
-<img align="right" src="https://github.com/ChatAFLndss/ChatAFL/assets/7456946/266f7d4f-c0af-4846-9e13-064e79c812b0">
+The repository is intended to make comparative experiments easy to run:
 
+- build one set of target Docker images;
+- run AFLNet, ChatAFL, StateAFL, and Voltron with the same subject list and timeout;
+- monitor container progress from the host;
+- collect ProFuzzBench-style archives and plots;
+- run Voltron's compliance analysis after each Voltron fuzzing task.
 
-ChatAFL is a protocol fuzzer guided by large language models (LLMs). It is built on top of [AFLNet](https://github.com/aflnet/aflnet) but integrates with three concrete components. Firstly, the fuzzer uses the LLM to extract a machine-readable grammar for a protocol that is used for structure-aware mutation. Secondly, the fuzzer uses the LLM to increase the diversity of messages in the recorded message sequences that are used as initial seeds. Lastly, the fuzzer uses the LLM to break out of a coverage plateau, where the LLM is prompted to generate messages to reach new states. 
+## Repository Layout
 
-The ChatAFL artifact is configured within [ProfuzzBench](https://github.com/profuzzbench/profuzzbench), a widely-used benchmark for stateful fuzzing of network protocols. This allows for smooth integration with an already established format.
-
-## Folder structure
-
-```
-ChatAFL-Artifact
-├── aflnet: a modified version of AFLNet which outputs states and state transitions 
-├── analyse.sh: analysis script 
-├── benchmark: a modified version of ProfuzzBench, containing only text-based protocols with the addition of Lighttpd 1.4 
-├── clean.sh: clean script
-├── ChatAFL: the source code of ChatAFL, with all strategies proposed in the paper
-├── ChatAFL-CL1: ChatAFL, which only uses the structure-aware mutations (c.f. Ablation study) 
-├── ChatAFL-CL2: ChatAFL, which only uses the structure-aware and initial seed enrichment (c.f. Ablation study)
-├── deps.sh: the script to install dependencies, asks for the password when executed
-├── README: this file
-├── run.sh: the execution script to run fuzzers on subjects and collect data
-└── setup.sh: the preparation script to set up docker images
-```
-
-## Citing ChatAFL
-
-ChatAFL has been accepted for publication at the 31st Annual Network and Distributed System Security Symposium (NDSS) 2024. The paper is also available [here](https://mengrj.github.io/pdfs/chatafl.pdf). If you use this code in your scientific work, please cite the paper as follows:
-
-```
-@inproceedings{chatafl,
-author={Ruijie Meng and Martin Mirchev and Marcel B\"{o}hme and Abhik Roychoudhury},
-title={Large Language Model guided Protocol Fuzzing},
-booktitle={Proceedings of the 31st Annual Network and Distributed System Security Symposium (NDSS)},
-year={2024},}
+```text
+.
+├── aflnet/                         # AFLNet source used by the benchmark images
+├── ChatAFL/                        # ChatAFL source used by the benchmark images
+├── benchmark/
+│   ├── subjects/                   # Protocol targets and Docker build contexts
+│   └── scripts/
+│       ├── execution/              # Docker execution and monitoring scripts
+│       └── analysis/               # CSV generation and plotting scripts
+├── crash_data/                     # Existing crash data snapshots
+├── cve/                            # CVE-related material
+├── scripts/prepare_voltron.sh      # Fetches or selects the Voltron source tree
+├── run.sh                          # Main experiment entry point
+├── run_voltron.sh                  # Voltron-specific host runner
+├── setup.sh                        # Copies fuzzers into subjects and builds images
+├── analyze.sh                      # Generates coverage/state plots from results
+├── clean.sh                        # Removes selected benchmark containers/images
+└── clean_images.sh                 # Removes all images built by this project
 ```
 
-## 1. Setup and Usage
+## Requirements
 
-### 1.1. Installing Dependencies
+- Docker
+- Bash
+- Git
+- Python 3 with `pandas` and `matplotlib` for result analysis
+- Network access while building StateAFL images or fetching Voltron
 
-`Docker`, `Bash`, `Python3` with `pandas` and `matplotlib` libraries. We provide a helper script `deps.sh` which runs the required steps to ensure that all dependencies are provided:
+The helper below installs common dependencies on supported systems:
 
 ```bash
 ./deps.sh
 ```
 
-### 1.2. Preparing Docker Images [~40 minutes]
+## Build Target Images
 
-Run the following command to set up all docker images, including the subjects with all fuzzers:
-
-```bash
-CHATAFL_API_KEY=... ./setup.sh
-```
-
-The process is estimated to take about 40 minutes. ChatAFL currently embeds
-its API configuration at compile time, so its key is supplied during setup.
-Voltron receives its LLM credentials at runtime as shown below.
-
-### 1.3. Running Experiments
-
-Utilize the `run.sh` script to run experiments. The command is as follows:
+Build all benchmark Docker images:
 
 ```bash
- ./run.sh <container_number> <fuzzed_time> <subjects> <fuzzers>
+./setup.sh
 ```
 
-Where `container_number` specifies how many containers are created to run a single fuzzer on a particular subject (each container runs one fuzzer on one subject). `fuzzed_time` indicates the fuzzing time in minutes. `subjects` is the list of subjects under test, and `fuzzers` is the list of fuzzers that are utilized to fuzz subjects. For example, the command (`run.sh 1 5 pure-ftpd chatafl`) would create 1 container for the fuzzer ChatAFL to fuzz the subject pure-ftpd for 5 minutes. In a short cut, one can execute all fuzzers and all subjects by using the writing `all` in place of the subject and fuzzer list.
+ChatAFL's LLM configuration is compiled into its source during setup. Supply it
+through environment variables when needed:
 
-Voltron is available as a third fuzzer for the targets configured by its
-current release:
+```bash
+CHATAFL_API_KEY=... \
+CHATAFL_MODEL=... \
+CHATAFL_URL=... \
+./setup.sh
+```
+
+The build script skips images that already exist. Force a rebuild with:
+
+```bash
+FORCE_REBUILD=1 ./setup.sh
+```
+
+The image tags built by the project are:
+
+```text
+live555-vol kamailio-vol exim-vol forked-daapd-vol pure-ftpd-vol
+proftpd-vol bftpd-vol lightftp-vol lighttpd1-vol
+```
+
+Each target also has a StateAFL image named
+`<target>-stateafl-vol`, for example `lightftp-stateafl-vol`.
+
+## Run Experiments
+
+Use `run.sh` for all fuzzers:
+
+```bash
+./run.sh <containers_per_target_fuzzer> <minutes> <subjects> <fuzzers>
+```
+
+Examples:
 
 ```bash
 ./run.sh 1 30 lightftp voltron
-./run.sh 3 240 bftpd,proftpd,pure-ftpd aflnet,chatafl,voltron
+./run.sh 3 240 bftpd,proftpd,pure-ftpd aflnet,chatafl,stateafl,voltron
+./run.sh 1 60 all aflnet,chatafl,stateafl
 ```
 
-The target images do not contain Voltron. When a Voltron experiment starts,
-the latest `main` revision from GitHub is fetched into `.runtime/`, mounted
-read-only into the container, and copied into the container's writable layer.
-To deliberately run another revision, no image rebuild is needed:
+Supported fuzzer names are:
 
-```bash
-VOLTRON_REF=497d44fabbdd68b542b29ad2801e3a3734b57297 ./run.sh 1 30 lightftp voltron
+```text
+aflnet chatafl stateafl voltron all
 ```
 
-Voltron's LLM configuration can be supplied at runtime without baking secrets
-into an image:
+The subject list is comma-separated. `all` expands to every configured subject
+for the selected fuzzer. The active target set is:
+
+```text
+live555 kamailio exim forked-daapd pure-ftpd proftpd bftpd lightftp lighttpd1
+```
+
+The script writes run archives under:
+
+```text
+benchmark/results-<subject>/out-<subject>-<fuzzer>_<run>.tar.gz
+```
+
+Containers are left in Docker after normal completion unless the lower-level
+runner is invoked with its optional delete argument. This is useful for
+post-mortem inspection with `docker logs` or `docker cp`.
+
+## StateAFL Integration
+
+StateAFL follows the ProFuzzBench integration model. Every active target has a
+`Dockerfile-stateafl` layered on its normal `*-vol` image. The derived image
+builds StateAFL, recompiles the same target revision with StateAFL's
+`afl-clang-fast`, and installs a target-specific `run-stateafl` setup script.
+
+Run it through the same entry point as AFLNet and ChatAFL:
 
 ```bash
-VOLTRON_LLM_BASE_URL=https://example.com/v1 \
-VOLTRON_LLM_API_KEY=... \
-VOLTRON_LLM_MODEL=... \
+./run.sh 1 30 lightftp stateafl
+./run.sh 1 30 all stateafl
+```
+
+StateAFL uses replay-format seed corpora. The ProFuzzBench replay corpora are
+used where available; the Lighttpd image deterministically converts its HTTP
+seeds to replay format during the image build.
+
+## Voltron Integration
+
+Target images do not contain Voltron. When a Voltron experiment starts,
+`scripts/prepare_voltron.sh` fetches the latest `main` revision from GitHub into
+`.runtime/voltron/`, creates a source snapshot, and mounts that snapshot into
+the target container.
+
+Use a specific Voltron branch, tag, or commit:
+
+```bash
+VOLTRON_REF=497d44fabbdd68b542b29ad2801e3a3734b57297 \
 ./run.sh 1 30 lightftp voltron
 ```
 
-The first Voltron run creates its Python environment inside the container.
-Downloaded Python and package artifacts are cached under
-`.runtime/voltron/uv-cache` and reused by later containers. For local Voltron
-development, bypass the Git snapshot cache with:
+Use a local Voltron checkout instead of the GitHub snapshot cache:
 
 ```bash
-VOLTRON_SOURCE_DIR=/path/to/voltron ./run.sh 1 30 lightftp voltron
+VOLTRON_SOURCE_DIR=/path/to/voltron \
+./run.sh 1 30 lightftp voltron
 ```
 
-Voltron state data is adapted to ProFuzzBench's `nodes` and `edges` series
-using distinct response types and response transitions. Its replay-based code
-coverage remains experimental; runs without replay data are therefore omitted
-from code-coverage plots rather than assigned synthetic coverage values.
-
-When the script completes, in the `benchmark` directory a folder `result-<name of subject>` will be created, containing fuzzing results for each run.
-
-### 1.4. Analyzing Results
-
-The `analyze.sh` script is used to analyze data and construct plots illustrating the average code and state coverage over time for fuzzers on each subject. The script is executed using the following command:
+Override the Voltron repository:
 
 ```bash
-./analyze.sh <subjects> <fuzzed_time> 
+VOLTRON_REPO=https://github.com/your-org/voltron.git \
+./run.sh 1 30 lightftp voltron
 ```
 
-The script takes in 2 arguments - `subjects` is the list of subjects under test and `fuzzed_time` is the duration of the run to be analyzed. Note that, the second argument is optional and the script by default will assume that the execution time is 1440 minutes, which is equal to 1 day. For example, the command (`analyze.sh exim 240`) will analyze the first 4 hours of the execution results of the exim subject.
+Voltron reads its API settings from `config/voltron-llm.yaml`. Start from the
+tracked example and keep the real configuration local:
 
-Upon completion of execution, the script will process the archives by construcing csv files, containing the covered number of branches, states, and state transitions over time. Furthermore, these csv files will be processed into PNG files which are plots, illustrating the average code and state coverage over time for fuzzers on each subject (`cov_over_time...` for the code and branch coverage, `state_over_time...` for the state and state transition coverage). All of this information is moved to a `res_<subject name>` folder in the root directory with a timestamp.
+```bash
+cp config/voltron-llm.example.yaml config/voltron-llm.yaml
+```
 
-### 1.5. Cleaning Up
+Configure one or more complete API profiles:
 
-When the evaluation of the artifact is completed, running the `clean.sh` script will ensure that the only leftover files are in this directory:
+```yaml
+profiles:
+  - base_url: https://api.example.com/v1
+    api_key: sk-key-1
+    model: example-model
+
+  - base_url: https://api.example.com/v1
+    api_key: sk-key-2
+    model: example-model
+```
+
+Each Voltron container receives one complete profile in round-robin order. The
+counter is shared by concurrently launched targets, so this command distributes
+all six containers across the configured profiles:
+
+```bash
+./run.sh 2 60 lightftp,bftpd,proftpd voltron
+```
+
+Use a configuration stored elsewhere with
+`VOLTRON_LLM_CONFIG=/path/to/voltron-llm.yaml`. API settings are accepted only
+through this YAML file so concurrent experiments always select a complete,
+internally consistent profile.
+
+The shared round-robin counter is
+`.runtime/voltron/api-profile-counter`. Override it with
+`VOLTRON_LLM_API_KEY_COUNTER=/path/to/counter`, or remove the counter file to
+restart assignment from the first profile.
+
+Test the concurrency capacity of every API profile before an experiment:
+
+```bash
+python3 scripts/test_voltron_api_pool.py \
+  --config config/voltron-llm.yaml \
+  --concurrency 1,2,4,8,16
+```
+
+Each worker sends two minimal chat-completion requests at every concurrency
+level. Test the aggregate capacity of the round-robin pool or save a detailed
+report with:
+
+```bash
+python3 scripts/test_voltron_api_pool.py \
+  --mode pool \
+  --concurrency 4,8,16,32 \
+  --json-output api-pool-report.json
+```
+
+The tester reports success rate, throughput, p50/p95 latency, HTTP 429 responses,
+timeouts, connection errors, and the highest tested concurrency meeting the
+default 95% success threshold. It never includes API keys in console or JSON
+output. Use `--requests-per-worker`, `--timeout`, `--endpoint`, `--prompt`, and
+`--min-success-rate` to adjust the workload for a provider.
+
+Voltron's Python and package artifacts are cached on the host under:
+
+```text
+.runtime/voltron/uv-cache
+```
+
+Set a custom cache directory with:
+
+```bash
+VOLTRON_UV_CACHE_DIR=/path/to/cache ./run.sh 1 30 lightftp voltron
+```
+
+After the requested fuzzing time elapses, the Voltron container runner calls:
+
+```bash
+uv run analyze_compliance --sut <target> --output <outdir>
+```
+
+The compliance-analysis log is saved in:
+
+```text
+<outdir>/analyze_compliance.log
+```
+
+If the Voltron analyzer entry point changes, override it with:
+
+```bash
+VOLTRON_COMPLIANCE_ANALYZER=<command> ./run.sh 1 30 lightftp voltron
+```
+
+Voltron state metrics are adapted to ProFuzzBench's `nodes` and `edges` series
+using distinct response types and response transitions. Voltron's replay-based
+code coverage remains experimental, so the runner preserves the
+`cov_over_time.csv` file contract without inventing synthetic coverage values.
+
+## Progress Monitoring
+
+All fuzzer runners use a host-side Docker monitor. The monitor does not inspect
+internal fuzzer state; it only reports elapsed time, remaining time, and Docker
+container status.
+
+Default behavior prints periodic status blocks. Useful options:
+
+```bash
+PROFUZZBENCH_MONITOR=0                  # Disable monitoring
+PROFUZZBENCH_MONITOR_INTERVAL=2         # Refresh every 2 seconds
+PROFUZZBENCH_MONITOR_DASHBOARD=1        # Use a clearing dashboard view
+```
+
+The dashboard mode is best for a single foreground experiment. For multiple
+parallel target/fuzzer runs, the default periodic output is easier to read.
+
+## Interrupt Handling
+
+The execution scripts handle `Ctrl-C` and `SIGTERM`. On interruption, the runner
+stops the monitor, handles all containers started by that run, prints a final
+container summary, optionally collects already-created result archives, and
+exits with status `130`.
+
+Default interruption behavior:
+
+```text
+Ctrl-C -> docker stop containers -> print summary -> try to collect archives
+```
+
+Configuration:
+
+```bash
+PROFUZZBENCH_INTERRUPT_ACTION=stop      # Default: docker stop
+PROFUZZBENCH_INTERRUPT_ACTION=kill      # docker kill
+PROFUZZBENCH_INTERRUPT_ACTION=leave     # Leave containers running
+PROFUZZBENCH_INTERRUPT_TIMEOUT=10       # docker stop timeout in seconds
+PROFUZZBENCH_COLLECT_ON_INTERRUPT=1     # Try to collect existing archives
+```
+
+For example, keep containers running after interrupting the host script:
+
+```bash
+PROFUZZBENCH_INTERRUPT_ACTION=leave ./run.sh 3 30 lightftp voltron
+```
+
+## Analyze Results
+
+Generate code-coverage and state-coverage plots:
+
+```bash
+./analyze.sh <subjects> <minutes>
+```
+
+Examples:
+
+```bash
+./analyze.sh lightftp 30
+./analyze.sh bftpd,proftpd,pure-ftpd 240
+```
+
+For each subject, analysis reads archives from `benchmark/results-<subject>/`,
+generates combined CSV files, plots code coverage and state coverage, and moves
+the artifacts to a timestamped directory in the repository root:
+
+```text
+res_<subject>_<timestamp>/
+```
+
+## Clean Up
+
+Remove benchmark images and containers for the original subject set:
 
 ```bash
 ./clean.sh
 ```
 
-To remove all Docker images built by this benchmark project, run:
+Remove all Docker images built by this project:
 
 ```bash
 ./clean_images.sh
 ```
 
-Use `./clean_images.sh --dry-run` to preview the containers and images that
-would be removed.
-
-## 2. Functional Analysis
-
-### 2.1. Examining LLM-generated Grammars
-
-The source code for the grammar generation is located in the function `setup_llm_grammars` in `afl-fuzz.c` with helper functions in `chat-llm.c`.
-
-The responses of the LLM for the grammar generation can be found in the `protocol-grammars` directory in the resulting archive of a run.
-
-### 2.2. Examining Enriched Seeds
-
-The source code for the seed enrichment is located in the function `get_seeds_with_messsage_types` in `afl-fuzz.c` with helper functions in `chat-llm.c`.
-
-The enriched seeds can be found in the seed `queue` directory in the resulting archive of a run. These files have the name `id:...,orig:enriched_`.
-
-### 2.3. Examining State-stall Responses
-
-The source code for the state stall processing is located in the function `fuzz_one` and starts at line 6846 (`if (uninteresting_times >= UNINTERESTING_THRESHOLD && chat_times < CHATTING_THRESHOLD){`).
-
-The state stall prompts and their corresponding responses can be found in the `stall-interactions` directory in the resulting archive of a run. The files are of the form `request-<id>` and `response-<id>`, containing the request we have constructed and the response from the LLM.
-
-
-## 3. Reproduction Results
-
-To conduct the experiments outlined in the paper, we utilized a vast amount of resources. It is impractical to replicate all the experiments within a single day using a standard desktop machine. To facilitate the evaluation of the artifact, we downsized our experiments, employing fewer fuzzers, subjects, and iterations.
-
-### 3.1. Comparison with Baselines [5 human-minutes + 180 compute-hours]
-
-ChatAFL can cover more states and code, and achieve the same state and code coverage faster than the baseline tool AFLNet. We run the following commands to support these claims:
+Preview what would be removed:
 
 ```bash
-./run.sh 5 240 kamailio,pure-ftpd,live555 chatafl,aflnet
-./analyze.sh kamailio,pure-ftpd,live555 240
+./clean_images.sh --dry-run
 ```
 
-Upon completion of the commands, a folder prefixed with `res_` will be generated. This folder contains PNG files illustrating the state and code covered by two fuzzers over time as well as the output archives from all the runs. It will be placed in the root directory of the artifact.
-
-### 3.2. Ablation Study [5 human-minutes + 180 compute-hours]
-
-Each strategy proposed in ChatAFL contributes to varying degrees of improvement in code coverage. We run the following commands to support this claim:
+Do not stop or delete containers before removing images:
 
 ```bash
-./run.sh 5 240 proftpd,exim chatafl,chatafl-cl1,chatafl-cl2
-./analyze.sh proftpd,exim 240
+./clean_images.sh --keep-containers
 ```
 
-Upon completion of the commands, a folder prefixed with `res_` will be generated. This folder contains PNG files illustrating the code covered by three fuzzers over time as well as the output archives from all the runs. It will be placed in the root directory of the artifact.
+Remove copied fuzzer source trees from subject directories:
 
-## 4. Customization
+```bash
+./remove.sh
+```
 
-### 4.1. Enhancing or experimenting with ChatAFL
+## Development Notes
 
-Changes to AFLNet, ChatAFL, or a target require
-`FORCE_REBUILD=1 ./setup.sh`. Voltron changes only require selecting a new
-`VOLTRON_REF` or setting `VOLTRON_SOURCE_DIR`; the same target images are
-reused.
+- Changes to AFLNet, ChatAFL, StateAFL Dockerfiles, or target build contexts
+  require image rebuilds.
+- Voltron changes do not require target image rebuilds; use `VOLTRON_REF` or
+  `VOLTRON_SOURCE_DIR`.
+- `SKIPCOUNT` controls how often progress samples are recorded.
+- `TEST_TIMEOUT` is forwarded into AFLNet/ChatAFL/StateAFL target options where
+  those options use `-t ${TEST_TIMEOUT}+`.
+- Voltron maps `pure-ftpd` to `pureftpd` and `lighttpd1` to `lighttpd` before
+  invoking its CLI.
 
-### 4.2. Tuning fuzzer parameters
+## Troubleshooting
 
-All parameters, used in the experiments are located in `config.h` and `chat-llm.h`. The parameters, specific to ChatAFL are:
+Inspect containers left after a run:
 
-In `config.h`:
+```bash
+docker ps -a
+docker logs <container_id>
+```
 
-* EPSILON_CHOICE
-* UNINTERESTING_THRESHOLD
-* CHATTING_THRESHOLD  
+Force image rebuilds if a Docker image is stale:
 
-In `chat-llm.h`:
+```bash
+FORCE_REBUILD=1 ./setup.sh
+```
 
-* STALL_RETRIES
-* GRAMMAR_RETRIES
-* MESSAGE_TYPE_RETRIES
-* ENRICHMENT_RETRIES
-* MAX_ENRICHMENT_MESSAGE_TYPES
-* MAX_ENRICHMENT_CORPUS_SIZE
+Clear cached Voltron snapshots if a local experiment should start fresh:
 
-### 4.3. Adding new subjects
+```bash
+rm -rf .runtime/voltron
+```
 
-To add an extra subject, we refer to [the instructions, provied by ProfuzzBench](https://github.com/profuzzbench/profuzzbench#1-how-do-i-extend-profuzzbench) for adding a new benchmark subject. As an example, we have added Lighttpd 1.4 as a new subject to the benchmark.
+Use `VOLTRON_SOURCE_DIR=/path/to/voltron` when debugging local Voltron changes.
 
-### 4.4. Troubleshooting
+## Citations
 
-If the fuzzer terminates with an error, a premature "I am done" message will be displayed. To examine this issue, running `docker logs <containerID>` will display the logs of the failing container.
+VoltronBench reuses infrastructure and source code from AFLNet, ChatAFL,
+StateAFL, and ProFuzzBench. If you use this repository in academic work, cite
+the relevant upstream systems.
 
-### 4.5. Working on GPT-4
+ChatAFL:
 
-We have released a new version of ChatAFL utilizing GPT-4: [gpt4-version](https://github.com/ChatAFLndss/ChatAFL/tree/gpt4-version). However, it hasn't been extensively tested yet. Please feel free to reach out if you encounter any issues during use.
+```bibtex
+@inproceedings{chatafl,
+  author={Ruijie Meng and Martin Mirchev and Marcel B\"{o}hme and Abhik Roychoudhury},
+  title={Large Language Model guided Protocol Fuzzing},
+  booktitle={Proceedings of the 31st Annual Network and Distributed System Security Symposium (NDSS)},
+  year={2024}
+}
+```
 
-## 5. Limitations
+ProFuzzBench:
 
-The current artifact interacts with OpenAI's Large Language Models (`gpt-3.5-turbo-instruct` and `gpt-3.5-turbo`). This puts a third-party limit to the degree of parallelization. The models used in this artifact have a hard limit of 150,000 tokens per minute.
+```bibtex
+@inproceedings{profuzzbench,
+  title={ProFuzzBench: A Benchmark for Stateful Protocol Fuzzing},
+  author={Roberto Natella and Van-Thuan Pham},
+  booktitle={Proceedings of the 30th ACM SIGSOFT International Symposium on Software Testing and Analysis},
+  year={2021}
+}
+```
 
-## 6. Special Thanks
+## License
 
-We would like to thank the creators of [AFLNet](https://github.com/aflnet/aflnet) and [ProFuzzBench](https://github.com/profuzzbench/profuzzbench) for the tooling and infrastructure they have provided to the community.
-
-## 7. License
-
-This artifact is licensed under the Apache License 2.0 - see the [LICENSE](./LICENSE) file for details.
+This repository contains code derived from upstream projects. See `LICENSE` and
+the license files in the vendored components for details.

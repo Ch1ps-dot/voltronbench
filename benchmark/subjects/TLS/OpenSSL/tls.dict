@@ -1,5 +1,0 @@
-app_content="\x17"
-handshake="\x16"
-ccs="\x14"
-alert="\x15"
-heartbeat="\x18"

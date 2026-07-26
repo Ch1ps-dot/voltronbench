@@ -13,7 +13,7 @@ docker build . -t live555
 ```
 
 ## Step-2. Run fuzzing
-The following commands run 4 instances of AFLNet and 4 instances of AFLnwe to simultaenously fuzz OpenSSH in 60 minutes.
+The following commands run 4 instances of AFLNet and 4 instances of AFLnwe to simultaenously fuzz Live555 in 60 minutes.
 
 ```bash
 cd $PFBENCH

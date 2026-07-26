@@ -30,3 +30,4 @@ benchmark/subjects/*/*/aflnet
 benchmark/subjects/*/*/voltron
 .runtime/
 __pycache__/
+config/voltron-llm.yaml

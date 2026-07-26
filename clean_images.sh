@@ -3,10 +3,6 @@
 set -u
 
 IMAGES=(
-  dnsmasq-vol
-  tinydtls-vol
-  openssh-vol
-  openssl-vol
   lightftp-vol
   bftpd-vol
   proftpd-vol
@@ -16,7 +12,15 @@ IMAGES=(
   kamailio-vol
   forked-daapd-vol
   lighttpd1-vol
-  dcmtk-vol
+  lightftp-stateafl-vol
+  bftpd-stateafl-vol
+  proftpd-stateafl-vol
+  pure-ftpd-stateafl-vol
+  exim-stateafl-vol
+  live555-stateafl-vol
+  kamailio-stateafl-vol
+  forked-daapd-stateafl-vol
+  lighttpd1-stateafl-vol
 )
 
 DRY_RUN=0

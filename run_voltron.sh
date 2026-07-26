@@ -59,6 +59,55 @@ UV_CACHE=${VOLTRON_UV_CACHE_DIR:-"$ROOT/.runtime/voltron/uv-cache"}
 mkdir -p "$UV_CACHE"
 chmod 0777 "$UV_CACHE"
 
+VOLTRON_LLM_CONFIG=${VOLTRON_LLM_CONFIG:-"$ROOT/config/voltron-llm.yaml"}
+VOLTRON_KEY_POOL_COUNTER=${VOLTRON_LLM_API_KEY_COUNTER:-"$ROOT/.runtime/voltron/api-profile-counter"}
+VOLTRON_KEY_POOL_LOCK="${VOLTRON_KEY_POOL_COUNTER}.lock"
+voltron_llm_profiles=()
+
+load_llm_profiles() {
+  local profile_data
+
+  if [ ! -r "$VOLTRON_LLM_CONFIG" ]; then
+    printf 'VOLTRON: LLM configuration is not readable: %s\n' "$VOLTRON_LLM_CONFIG" >&2
+    printf 'VOLTRON: copy config/voltron-llm.example.yaml to config/voltron-llm.yaml\n' >&2
+    exit 1
+  fi
+  if ! profile_data=$(python3 "$ROOT/scripts/load_voltron_llm_config.py" "$VOLTRON_LLM_CONFIG"); then
+    exit 1
+  fi
+  mapfile -t voltron_llm_profiles <<< "$profile_data"
+  if (( ${#voltron_llm_profiles[@]} == 0 || ${#voltron_llm_profiles[@]} % 3 != 0 )); then
+    printf 'VOLTRON: invalid profile data from %s\n' "$VOLTRON_LLM_CONFIG" >&2
+    exit 1
+  fi
+}
+
+select_llm_profile() {
+  local pool_size=$(( ${#voltron_llm_profiles[@]} / 3 ))
+  local counter next index
+
+  [ "$pool_size" -gt 0 ] || return 1
+
+  mkdir -p "$(dirname "$VOLTRON_KEY_POOL_COUNTER")"
+  {
+    flock 8
+    if [ -f "$VOLTRON_KEY_POOL_COUNTER" ]; then
+      counter=$(<"$VOLTRON_KEY_POOL_COUNTER")
+    else
+      counter=0
+    fi
+    case "$counter" in
+      ''|*[!0-9]*) counter=0 ;;
+    esac
+    index=$((counter % pool_size))
+    next=$((counter + 1))
+    printf '%s\n' "$next" > "$VOLTRON_KEY_POOL_COUNTER"
+    printf '%s\n' "$index"
+  } 8>"$VOLTRON_KEY_POOL_LOCK"
+}
+
+load_llm_profiles
+
 for i in $(seq 1 "$RUNS"); do
   docker_args=(
     run --cpus=1 -d -it
@@ -68,11 +117,20 @@ for i in $(seq 1 "$RUNS"); do
     -e UV_CACHE_DIR=/home/ubuntu/.cache/uv
     -e UV_PYTHON_INSTALL_DIR=/home/ubuntu/.cache/uv/python
   )
-  for env_name in VOLTRON_LLM_BASE_URL VOLTRON_LLM_API_KEY VOLTRON_LLM_MODEL VOLTRON_STATS_INTERVAL VOLTRON_COMPLIANCE_ANALYZER; do
+  for env_name in VOLTRON_STATS_INTERVAL VOLTRON_COMPLIANCE_ANALYZER; do
     if [ -n "${!env_name:-}" ]; then
       docker_args+=(-e "${env_name}=${!env_name}")
     fi
   done
+  if [ "${#voltron_llm_profiles[@]}" -gt 0 ]; then
+    profile_index=$(select_llm_profile)
+    profile_offset=$((profile_index * 3))
+    docker_args+=(
+      -e "VOLTRON_LLM_BASE_URL=$(printf '%s' "${voltron_llm_profiles[$profile_offset]}" | base64 -d)"
+      -e "VOLTRON_LLM_API_KEY=$(printf '%s' "${voltron_llm_profiles[$((profile_offset + 1))]}" | base64 -d)"
+      -e "VOLTRON_LLM_MODEL=$(printf '%s' "${voltron_llm_profiles[$((profile_offset + 2))]}" | base64 -d)"
+    )
+  fi
 
   id=$(docker "${docker_args[@]}" "$DOCIMAGE" /bin/bash \
     /opt/voltron-benchmark-runner.sh "$TARGET" "$OUTDIR" "$TIMEOUT" "$SKIPCOUNT")

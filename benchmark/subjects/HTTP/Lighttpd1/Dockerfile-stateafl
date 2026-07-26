@@ -1,0 +1,35 @@
+FROM lighttpd1-vol
+
+# Import environment variable to pass as parameter to make (e.g., to make parallel builds with -j)
+ARG MAKE_OPT
+
+# Set up StateAFL
+ENV STATEAFL="/home/ubuntu/stateafl"
+
+RUN git clone https://github.com/stateafl/stateafl.git $STATEAFL && \
+    cd $STATEAFL && \
+    make clean all $MAKE_OPT && \
+    rm as && \
+    cd llvm_mode && make $MAKE_OPT
+
+# Set up environment variables for StateAFL
+ENV AFL_PATH=${STATEAFL}
+ENV PATH=${STATEAFL}:${PATH}
+
+# Build the same Lighttpd revision as the base image with StateAFL instrumentation.
+RUN cd $WORKDIR && \
+    git clone https://git.lighttpd.net/lighttpd/lighttpd1.4.git lighttpd1-stateafl && \
+    cd lighttpd1-stateafl && \
+    git checkout 9f38b63cae3e2 && \
+    ./autogen.sh && \
+    CC=${STATEAFL}/afl-clang-fast CXX=${STATEAFL}/afl-clang-fast++ ./configure --enable-static --disable-shared && \
+    make clean all $MAKE_OPT
+
+# StateAFL consumes replayable seeds: a 32-bit message length followed by data.
+RUN mkdir ${WORKDIR}/in-http-replay && \
+    for seed in ${WORKDIR}/in-http/*; do \
+      output="${WORKDIR}/in-http-replay/$(basename "${seed}" .raw).replay"; \
+      python3 -c 'import pathlib, struct, sys; data = pathlib.Path(sys.argv[1]).read_bytes(); pathlib.Path(sys.argv[2]).write_bytes(struct.pack("<I", len(data)) + data)' "${seed}" "${output}"; \
+    done
+
+COPY --chown=ubuntu:ubuntu run-stateafl.sh ${WORKDIR}/run-stateafl

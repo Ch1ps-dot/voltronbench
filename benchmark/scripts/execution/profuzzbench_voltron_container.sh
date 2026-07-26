@@ -24,15 +24,21 @@ mkdir -p "$VOLTRON_DIR"
 cp -a "$VOLTRON_SOURCE/." "$VOLTRON_DIR/"
 cd "$VOLTRON_DIR"
 
-if [ -n "${VOLTRON_LLM_BASE_URL:-}" ]; then
-  sed -i "s|^  base_url:.*|  base_url: ${VOLTRON_LLM_BASE_URL}|" config/configs.yaml
-fi
-if [ -n "${VOLTRON_LLM_API_KEY:-}" ]; then
-  sed -i "s|^  api_key:.*|  api_key: ${VOLTRON_LLM_API_KEY}|" config/configs.yaml
-fi
-if [ -n "${VOLTRON_LLM_MODEL:-}" ]; then
-  sed -i "s|^  model:.*|  model: ${VOLTRON_LLM_MODEL}|" config/configs.yaml
-fi
+replace_llm_setting() {
+  local field=$1
+  local value=$2
+  local yaml_value
+
+  yaml_value=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$value")
+  yaml_value=${yaml_value//\\/\\\\}
+  yaml_value=${yaml_value//&/\\&}
+  yaml_value=${yaml_value//|/\\|}
+  sed -i "s|^  ${field}:.*|  ${field}: ${yaml_value}|" config/configs.yaml
+}
+
+replace_llm_setting base_url "$VOLTRON_LLM_BASE_URL"
+replace_llm_setting api_key "$VOLTRON_LLM_API_KEY"
+replace_llm_setting model "$VOLTRON_LLM_MODEL"
 
 rm -rf "$OUTDIR"
 mkdir -p "$OUTDIR"

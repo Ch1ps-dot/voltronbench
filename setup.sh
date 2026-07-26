@@ -17,8 +17,20 @@ if [ -n "${CHATAFL_API_KEY:-}" ]; then
   sed -i "s/#define OPENAI_TOKEN \".*\"/#define OPENAI_TOKEN \"$CHATAFL_API_KEY\"/" ChatAFL/chat-llm.h
 fi
 
-# Copy the different versions of ChatAFL to the benchmark directories
-for subject in "$PFBENCH"/subjects/*/*; do
+SUBJECTS=(
+  "$PFBENCH/subjects/RTSP/Live555"
+  "$PFBENCH/subjects/SIP/Kamailio"
+  "$PFBENCH/subjects/SMTP/Exim"
+  "$PFBENCH/subjects/DAAP/forked-daapd"
+  "$PFBENCH/subjects/FTP/PureFTPD"
+  "$PFBENCH/subjects/FTP/ProFTPD"
+  "$PFBENCH/subjects/FTP/BFTPD"
+  "$PFBENCH/subjects/FTP/LightFTP"
+  "$PFBENCH/subjects/HTTP/Lighttpd1"
+)
+
+# Copy AFLNet and ChatAFL into the active target build contexts.
+for subject in "${SUBJECTS[@]}"; do
   rm -rf "$subject/aflnet" "$subject/chatafl" "$subject/voltron"
   cp -r "$ROOT/aflnet" "$subject/aflnet"
   cp -r "$ROOT/ChatAFL" "$subject/chatafl"
@@ -29,6 +41,6 @@ done
 cd "$PFBENCH"
 PFBENCH="$PFBENCH" scripts/execution/profuzzbench_build_all.sh
 
-for subject in "$PFBENCH"/subjects/*/*; do
+for subject in "${SUBJECTS[@]}"; do
   rm -rf "$subject/aflnet" "$subject/chatafl" "$subject/voltron"
 done
