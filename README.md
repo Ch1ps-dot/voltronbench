@@ -203,6 +203,14 @@ Run it through the same entry point as AFLNet and ChatAFL:
 ./run.sh 1 30 all stateafl
 ```
 
+Before launching StateAFL containers, `run.sh` temporarily sets the host
+`/proc/sys/kernel/core_pattern` to `core` and disables ASLR through
+`/proc/sys/kernel/randomize_va_space`. These host-global settings require root
+access, so the script may prompt for `sudo`. Their original values are restored
+when the top-level experiment command exits. Concurrent top-level StateAFL
+commands are serialized to prevent one command from restoring the settings
+while another experiment is still running.
+
 StateAFL uses replay-format seed corpora. The ProFuzzBench replay corpora are
 used where available; the Lighttpd image deterministically converts its HTTP
 seeds to replay format during the image build.
