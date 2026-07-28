@@ -16,13 +16,15 @@ The repository is intended to make comparative experiments easy to run:
 ## Quick Start
 
 The shortest path is to build the active benchmark images, run one small
-non-LLM experiment, and inspect the exported ProFuzzBench archive:
+non-LLM experiment, and inspect the exported ProFuzzBench archive and combined
+result bundle:
 
 ```bash
 ./deps.sh
 ./setup.sh
 ./run.sh 1 5 lightftp stateafl
-ls benchmark/results-lightftp/out-lightftp-stateafl_1.tar.gz
+find benchmark/experiment-runs -name 'out-lightftp-stateafl_1.tar.gz'
+ls res_experiment_*.tar.gz
 ```
 
 Run AFLNet or ChatAFL with the same entry point:
@@ -32,10 +34,13 @@ Run AFLNet or ChatAFL with the same entry point:
 ./run.sh 1 5 lightftp chatafl
 ```
 
-Generate coverage and state plots from the exported archives:
+`run.sh` automatically generates coverage and state plots after all experiment
+containers finish. To rerun analysis manually from existing archives:
 
 ```bash
-./analyze.sh lightftp 5
+RUN_DIR=$(find benchmark/experiment-runs -mindepth 1 -maxdepth 1 \
+  -type d | sort | tail -1)
+./analyze.sh lightftp 5 ./reanalyzed "$RUN_DIR"
 ```
 
 To run several active targets and fuzzers together:
@@ -173,17 +178,32 @@ for the selected fuzzer. The active target set is:
 live555 kamailio exim forked-daapd pure-ftpd proftpd bftpd lightftp lighttpd1
 ```
 
-The script writes run archives under:
+Each `run.sh` invocation creates a unique run ID and writes its run archives
+under an isolated directory:
 
 ```text
-benchmark/results-<subject>/out-<subject>-<fuzzer>_<run>.tar.gz
+benchmark/experiment-runs/<run-id>/results-<subject>/
+└── out-<subject>-<fuzzer>_<replication>.tar.gz
 ```
 
-This archive naming is shared by AFLNet, ChatAFL, StateAFL, and Voltron. For
-example, a single LightFTP StateAFL run writes:
+After all selected experiments finish, `run.sh` automatically runs
+`analyze.sh` and creates a combined archive in the repository root:
 
 ```text
-benchmark/results-lightftp/out-lightftp-stateafl_1.tar.gz
+res_experiment_<run-id>.tar.gz
+```
+
+The archive contains the experiment parameters and one timestamped analysis
+directory per subject. Each subject directory includes the original run
+archives, generated CSV files, and coverage/state plots. The unique run ID
+prevents sequential or concurrent `run.sh` invocations from overwriting each
+other's raw archives, analysis files, or combined bundles.
+
+This archive naming is shared by AFLNet, ChatAFL, StateAFL, and Voltron. For
+example, a single LightFTP StateAFL replication writes:
+
+```text
+benchmark/experiment-runs/<run-id>/results-lightftp/out-lightftp-stateafl_1.tar.gz
 ```
 
 Containers are left in Docker after normal completion unless the lower-level
@@ -219,7 +239,8 @@ seeds to replay format during the image build.
 StateAFL exports results through the same ProFuzzBench archive contract as
 AFLNet and ChatAFL. The common executor copies
 `/home/ubuntu/experiments/out-<target>-stateafl.tar.gz` from each container to
-`benchmark/results-<target>/out-<target>-stateafl_<run>.tar.gz`. Any files
+`benchmark/experiment-runs/<run-id>/results-<target>/out-<target>-stateafl_<run>.tar.gz`.
+Any files
 under the fuzzer output directory are preserved in the archive; the analysis
 pipeline specifically consumes `cov_over_time.csv` and `plot_data` when they
 are present.
@@ -435,7 +456,8 @@ PROFUZZBENCH_INTERRUPT_ACTION=leave ./run.sh 3 30 lightftp voltron
 
 ## Analyze Results
 
-Generate code-coverage and state-coverage plots:
+`run.sh` invokes analysis automatically after experiment execution succeeds.
+To regenerate code-coverage and state-coverage plots from existing archives:
 
 ```bash
 ./analyze.sh <subjects> <minutes>
@@ -446,11 +468,19 @@ Examples:
 ```bash
 ./analyze.sh lightftp 30
 ./analyze.sh bftpd,proftpd,pure-ftpd 240
+RUN_DIR=benchmark/experiment-runs/2026-07-28_22-40-40_pimesa
+./analyze.sh lightftp 30 ./reanalyzed "$RUN_DIR"
 ```
 
-For each subject, analysis reads archives from `benchmark/results-<subject>/`,
-generates combined CSV files, plots code coverage and state coverage, and moves
-the artifacts to a timestamped directory in the repository root:
+Without optional paths, manual analysis remains compatible with legacy
+`benchmark/results-<subject>/` directories. The fourth argument selects an
+isolated `benchmark/experiment-runs/<run-id>/` directory created by the current
+`run.sh`.
+
+For each subject, analysis reads archives from the selected results root,
+generates combined CSV files, plots code coverage and state coverage, and
+stores the artifacts under the selected output root. The default output root is
+the repository root:
 
 ```text
 res_<subject>_<timestamp>/

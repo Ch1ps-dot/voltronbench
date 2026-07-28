@@ -7,6 +7,7 @@ export TEST_TIMEOUT="${TEST_TIMEOUT:-20000}"
 
 TARGET_LIST="${1:-}"
 FUZZER_LIST="${2:-}"
+RESULTS_ROOT="${RESULTS_ROOT:-$PFBENCH}"
 
 SUPPORTED_TARGETS="live555 kamailio exim forked-daapd pure-ftpd proftpd bftpd lightftp lighttpd1"
 SUPPORTED_FUZZERS="aflnet chatafl stateafl voltron"
@@ -101,11 +102,11 @@ run_standard_target() {
         options="${options} $(stateafl_vanilla_options "$target")"
     fi
 
-    mkdir -p "$PFBENCH/$result_dir"
+    mkdir -p "$RESULTS_ROOT/$result_dir"
     profuzzbench_exec_common.sh \
         "$image" \
         "$NUM_CONTAINERS" \
-        "$PFBENCH/$result_dir" \
+        "$RESULTS_ROOT/$result_dir" \
         "$fuzzer" \
         "$out_dir" \
         "$options" \
@@ -118,11 +119,11 @@ run_voltron_target() {
     local result_dir="results-${target}"
     local out_dir="out-${target}-voltron"
 
-    mkdir -p "$PFBENCH/$result_dir"
+    mkdir -p "$RESULTS_ROOT/$result_dir"
     "$PFBENCH/../run_voltron.sh" \
         "${target}-vol" \
         "$NUM_CONTAINERS" \
-        "$PFBENCH/$result_dir" \
+        "$RESULTS_ROOT/$result_dir" \
         "$target" \
         "$out_dir" \
         "$TIMEOUT" \
@@ -167,6 +168,7 @@ echo "# SKIPCOUNT: ${SKIPCOUNT}"
 echo "# TEST TIMEOUT: ${TEST_TIMEOUT} ms"
 echo "# TARGET LIST: ${targets}"
 echo "# FUZZER LIST: ${fuzzers}"
+echo "# RESULTS ROOT: ${RESULTS_ROOT}"
 echo
 
 for fuzzer in $fuzzers; do

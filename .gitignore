@@ -23,6 +23,7 @@ afl-llvm-rt-64.o
 afl-llvm-rt.o
 
 res_*
+benchmark/experiment-runs/
 benchmark/subjects/*/*/chatafl
 benchmark/subjects/*/*/chatafl-cl1
 benchmark/subjects/*/*/chatafl-cl2
