@@ -111,7 +111,7 @@ run_standard_target() {
         "$out_dir" \
         "$options" \
         "$TIMEOUT" \
-        "$SKIPCOUNT" &
+        "$SKIPCOUNT"
 }
 
 run_voltron_target() {
@@ -127,7 +127,7 @@ run_voltron_target() {
         "$target" \
         "$out_dir" \
         "$TIMEOUT" \
-        "$SKIPCOUNT" &
+        "$SKIPCOUNT"
 }
 
 if [[ -z "$TARGET_LIST" || -z "$FUZZER_LIST" ]]; then
@@ -153,6 +153,7 @@ for target in $targets; do
     fi
 done
 
+job_pids=()
 for fuzzer in $fuzzers; do
     if ! in_list "$fuzzer" "$SUPPORTED_FUZZERS"; then
         echo "Unsupported fuzzer: $fuzzer" >&2
@@ -178,11 +179,19 @@ for fuzzer in $fuzzers; do
         echo
 
         if [[ "$fuzzer" == "voltron" ]]; then
-            run_voltron_target "$target"
+            run_voltron_target "$target" &
         else
-            run_standard_target "$target" "$fuzzer"
+            run_standard_target "$target" "$fuzzer" &
         fi
+        job_pids+=("$!")
     done
 done
 
-wait
+EXECUTION_STATUS=0
+for job_pid in "${job_pids[@]}"; do
+    if ! wait "$job_pid"; then
+        EXECUTION_STATUS=1
+    fi
+done
+
+exit "$EXECUTION_STATUS"

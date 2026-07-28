@@ -10,12 +10,14 @@ states_data=$6
 #create a new file if append = 0
 if [ $append = "0" ]; then
   #echo "Trying to delete $PWD/$covfile"
-  rm "$PWD/$covfile" ; touch $covfile
-  echo "time,subject,fuzzer,run,cov_type,cov" >> $covfile
+  rm -f "$PWD/$covfile"
+  touch "$covfile"
+  echo "time,subject,fuzzer,run,cov_type,cov" >> "$covfile"
 
   #echo "Trying to delete $PWD/$states_data"
-  rm $states_data ; touch $states_data
-  echo "time,subject,fuzzer,run,state_type,state" >> $states_data
+  rm -f "$states_data"
+  touch "$states_data"
+  echo "time,subject,fuzzer,run,state_type,state" >> "$states_data"
 fi
 
 #remove space(s) 
@@ -53,26 +55,59 @@ convert() {
 #original format: unix_time, cycles_done, cur_path, paths_total, pending_total, pending_favs, map_size, unique_crashes, unique_hangs, max_depth, execs_per_sec, n_nodes, n_edges, chat_times
 #converted format: time,subject,fuzzer,run,data_type,data
 convert_state() {
-  fuzzer=$1
-  subject=$2
-  run_index=$3
-  ifile=$4
-  ofile=$5
+  local fuzzer=$1
+  local subject=$2
+  local run_index=$3
+  local ifile=$4
+  local ofile=$5
+  local converted
 
-  {
-    read #ignore the header
-    while read -r line; do
-      time=$(strim $(echo $line | cut -d',' -f1))
-      nodes=$(strim $(echo $line | cut -d',' -f12))
-      edges=$(strim $(echo $line | cut -d',' -f13))
-      echo $time,$subject,$fuzzer,$run_index,"nodes",$nodes >> $ofile
-      echo $time,$subject,$fuzzer,$run_index,"edges",$edges >> $ofile
-    done 
-  } < $ifile
+  converted=$(mktemp)
+  if ! awk -F',' \
+      -v subject="$subject" \
+      -v fuzzer="$fuzzer" \
+      -v run_index="$run_index" '
+    function trim(value) {
+      gsub(/^[[:space:]#]+/, "", value)
+      gsub(/[[:space:]]+$/, "", value)
+      return value
+    }
+
+    NR == 1 {
+      for (column_index = 1; column_index <= NF; column_index++) {
+        columns[trim($column_index)] = column_index
+      }
+      if (!("unix_time" in columns) ||
+          !("n_nodes" in columns) ||
+          !("n_edges" in columns)) {
+        print "State data schema error: expected unix_time,n_nodes,n_edges in " FILENAME > "/dev/stderr"
+        exit 2
+      }
+      next
+    }
+
+    {
+      time = trim($(columns["unix_time"]))
+      nodes = trim($(columns["n_nodes"]))
+      edges = trim($(columns["n_edges"]))
+      if (time !~ /^[0-9]+$/ || nodes !~ /^[0-9]+$/ || edges !~ /^[0-9]+$/) {
+        print "State data value error in " FILENAME " at line " NR > "/dev/stderr"
+        exit 3
+      }
+      print time "," subject "," fuzzer "," run_index ",nodes," nodes
+      print time "," subject "," fuzzer "," run_index ",edges," edges
+    }
+  ' "$ifile" > "$converted"; then
+    rm -f "$converted"
+    return 1
+  fi
+
+  cat "$converted" >> "$ofile"
+  rm -f "$converted"
 }
 
-
 #extract tar files & process the data
+status=0
 for fuzzer in $fuzzers; do 
   for i in $(seq 1 $runs); do 
     printf "\nProcessing out-${prog}-${fuzzer}-${i} ..."
@@ -86,7 +121,13 @@ for fuzzer in $fuzzers; do
       convert $fuzzer $prog $i out-${prog}-${fuzzer}-${i}/cov_over_time.csv $covfile
     fi
     if [ -s out-${prog}-${fuzzer}-${i}/plot_data ]; then
-      convert_state $fuzzer $prog $i out-${prog}-${fuzzer}-${i}/plot_data $states_data
+      if ! convert_state \
+          "$fuzzer" "$prog" "$i" \
+          "out-${prog}-${fuzzer}-${i}/plot_data" "$states_data"; then
+        status=1
+      fi
     fi
   done 
 done
+
+exit "$status"

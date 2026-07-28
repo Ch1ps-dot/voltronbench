@@ -1,6 +1,7 @@
 #!/bin/bash
 
 DATADIR=$PWD
+ANALYSIS_STATUS=0
 
 echo
 echo "Analyzing data in $DATADIR"
@@ -16,7 +17,7 @@ then
 fi
 
 
-echo "${FOLDERS[@]}" | while read RESULTDIR; do
+while read -r RESULTDIR; do
 
     echo
     echo
@@ -42,7 +43,11 @@ echo "${FOLDERS[@]}" | while read RESULTDIR; do
         echo "FUZZER: '$FUZZER'"
         echo
 
-        profuzzbench_generate_csv.sh $TARGET $REPS $FUZZER results.csv $APPEND states.csv
+        if ! profuzzbench_generate_csv.sh \
+            "$TARGET" "$REPS" "$FUZZER" results.csv "$APPEND" states.csv; then
+            echo "State/coverage conversion failed for $FUZZER on $TARGET." >&2
+            ANALYSIS_STATUS=1
+        fi
         APPEND=1
 
         ls | grep out- | grep -v "tar.gz" | xargs rm -rf
@@ -52,7 +57,13 @@ echo "${FOLDERS[@]}" | while read RESULTDIR; do
         #fi
     done
 
-    profuzzbench_plot.py -i $DATADIR/$RESULTDIR/results.csv -p $TARGET -r $REPS -c $TIME -s 1 -o $DATADIR/cov_over_time_${TARGET}.png -f $FUZZERS
-    profuzzbench_state.py -i $DATADIR/$RESULTDIR/states.csv -p $TARGET -r $REPS -c $TIME -s 1 -o $DATADIR/state_over_time_${TARGET}.png -f $FUZZERS
+    if ! profuzzbench_plot.py -i "$DATADIR/$RESULTDIR/results.csv" -p "$TARGET" -r "$REPS" -c "$TIME" -s 1 -o "$DATADIR/cov_over_time_${TARGET}.png" -f $FUZZERS; then
+        ANALYSIS_STATUS=1
+    fi
+    if ! profuzzbench_state.py -i "$DATADIR/$RESULTDIR/states.csv" -p "$TARGET" -r "$REPS" -c "$TIME" -s 1 -o "$DATADIR/state_over_time_${TARGET}.png" -f $FUZZERS; then
+        ANALYSIS_STATUS=1
+    fi
 
-done
+done < <(printf '%s\n' "${FOLDERS[@]}")
+
+exit "$ANALYSIS_STATUS"

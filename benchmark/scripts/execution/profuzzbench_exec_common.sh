@@ -24,12 +24,14 @@ PROFUZZBENCH_RUN_START_EPOCH=$(date +%s)
 collect_results() {
   local index=1
   local id
+  local status=0
 
   printf "\n${FUZZER^^}: Collecting results and save them to ${SAVETO}"
   for id in "${cids[@]}"; do
     printf "\n${FUZZER^^}: Collecting results from container ${id}"
     if ! docker cp "${id}:/home/ubuntu/experiments/${OUTDIR}.tar.gz" "${SAVETO}/${OUTDIR}_${index}.tar.gz" > /dev/null 2>&1; then
       printf "\n${FUZZER^^}: No archive available from container ${id}"
+      status=1
     fi
     if [ -n "$DELETE" ]; then
       printf "\nDeleting ${id}"
@@ -37,6 +39,7 @@ collect_results() {
     fi
     index=$((index+1))
   done
+  return "$status"
 }
 
 handle_interrupt() {
@@ -57,7 +60,7 @@ trap handle_interrupt INT TERM
 #create one container for each run
 for i in $(seq 1 $RUNS); do
   id=$(docker run --cpus=1 -d -it $DOCIMAGE /bin/bash -c "cd ${WORKDIR} && run ${FUZZER} ${OUTDIR} '${OPTIONS}' ${TIMEOUT} ${SKIPCOUNT}")
-  cids+=(${id::12}) #store only the first 12 characters of a container ID
+  cids+=("${id::12}") #store only the first 12 characters of a container ID
 done
 
 dlist="" #docker list
@@ -72,11 +75,27 @@ if [ "$PROFUZZBENCH_MONITOR" != "0" ]; then
   profuzzbench_monitor_containers "$LABEL" "$TIMEOUT" "${cids[@]}" &
   MONITOR_PID=$!
 fi
-docker wait ${dlist} > /dev/null
+CONTAINER_STATUS=0
+for id in "${cids[@]}"; do
+  if ! exit_code=$(docker wait "$id"); then
+    printf "\n${FUZZER^^}: Failed to wait for container ${id}"
+    CONTAINER_STATUS=1
+  elif [[ "$exit_code" != "0" ]]; then
+    printf "\n${FUZZER^^}: Container ${id} exited with status ${exit_code}"
+    CONTAINER_STATUS=1
+  fi
+done
 profuzzbench_stop_monitor "$MONITOR_PID"
 profuzzbench_print_final_container_summary "$LABEL" "$TIMEOUT" "${cids[@]}"
 
 #collect the fuzzing results from the containers
-collect_results
+if ! collect_results; then
+  CONTAINER_STATUS=1
+fi
+
+if [[ "$CONTAINER_STATUS" != "0" ]]; then
+  printf "\n${FUZZER^^}: Completed with failed container(s).\n"
+  exit "$CONTAINER_STATUS"
+fi
 
 printf "\n${FUZZER^^}: I am done!\n"

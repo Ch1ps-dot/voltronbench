@@ -14,8 +14,12 @@ ENV STATEAFL_CFLAGS="-D__TRACER_USE_PTHREAD_MUTEX"
 ENV TRACE_CUSTOM_RECEIVE="evhttp_request_get_uri"
 ENV TRACE_CUSTOM_SEND="evhttp_send_reply"
 
+COPY --chown=ubuntu:ubuntu stateafl-benchmark.patch ${WORKDIR}/stateafl-benchmark.patch
+
 RUN git clone https://github.com/stateafl/stateafl.git $STATEAFL && \
     cd $STATEAFL && \
+    git checkout d923e22f7b2688db45b08f3fa3a29a566e7ff3a4 && \
+    patch -p1 < ${WORKDIR}/stateafl-benchmark.patch && \
     make clean all $MAKE_OPT && \
     rm as && \
     cd llvm_mode && CFLAGS="${STATEAFL_CFLAGS}" make $MAKE_OPT

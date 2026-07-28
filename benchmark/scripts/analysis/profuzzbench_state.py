@@ -1,58 +1,83 @@
 #!/usr/bin/env python3
 
 import argparse
+import sys
 from pandas import read_csv
-from pandas import DataFrame
-from pandas import Grouper
 from matplotlib import pyplot as plt
 import pandas as pd
 
 
 def main(csv_file, put, runs, cut_off, step, out_file, fuzzers):
-  #Read the results
   df = read_csv(csv_file)
+  required_columns = {
+      'time', 'subject', 'fuzzer', 'run', 'state_type', 'state'
+  }
+  missing_columns = required_columns.difference(df.columns)
+  if missing_columns:
+    print(
+        "State CSV schema error: missing {}".format(
+            ", ".join(sorted(missing_columns))
+        ),
+        file=sys.stderr,
+    )
+    return 1
 
-  #Calculate the mean of code coverage
-  #Store in a list first for efficiency
+  df['time'] = pd.to_numeric(df['time'], errors='coerce')
+  df['state'] = pd.to_numeric(df['state'], errors='coerce')
+  invalid_rows = df[df[['time', 'state']].isna().any(axis=1)]
+  if not invalid_rows.empty:
+    print(
+        "State CSV contains {} row(s) with invalid time/state values.".format(
+            len(invalid_rows)
+        ),
+        file=sys.stderr,
+    )
+    return 1
+
   mean_list = []
 
   for subject in [put]:
     for fuzzer in fuzzers:
       for data_type in ['nodes', 'edges']:
-        #get subject & fuzzer & cov_type-specific dataframe
         df1 = df[(df['subject'] == subject) & 
                          (df['fuzzer'] == fuzzer) & 
                          (df['state_type'] == data_type)]
 
-        mean_list.append((subject, fuzzer, data_type, 0, 0.0))
-        for time in range(1, cut_off + 1, step):
-          cov_total = 0
-          run_count = 0
+        run_frames = []
+        for run in range(1, runs + 1):
+          df2 = df1[df1['run'] == run].sort_values('time')
+          if df2.empty:
+            print(
+                "No {} state data for {} run {}; excluding it from the mean.".format(
+                    data_type, fuzzer, run
+                ),
+                file=sys.stderr,
+            )
+            continue
+          run_frames.append(df2)
 
-          for run in range(1, runs + 1, 1):
-            #get run-specific data frame
-            df2 = df1[df1['run'] == run]
+        for time in range(0, cut_off + 1, step):
+          values = []
+          for df2 in run_frames:
+            start = df2.iloc[0]['time']
+            df3 = df2[df2['time'] <= start + time * 60]
+            if not df3.empty:
+              values.append(df3.iloc[-1]['state'])
 
-            try:
-              #get the starting time for this run
-              start = df2.iloc[0, 0]
+          if values:
+            mean_list.append(
+                (subject, fuzzer, data_type, time, sum(values) / len(values))
+            )
 
-              #get all rows given a cutoff time
-              df3 = df2[df2['time'] <= start + time*60]
-              
-              #update total coverage and #runs
-              cov_total += df3.tail(1).iloc[0, 5]
-              run_count += 1
-            except Exception:
-              print("Issue with run {}. Skipping".format(run))
-          
-          #add a new row
-          mean_list.append((subject, fuzzer, data_type, time, cov_total / max(run_count,1)))
+  if not mean_list:
+    print(
+        "No valid state measurements were found; state plot was not generated.",
+        file=sys.stderr,
+    )
+    return 1
 
-  #Convert the list to a dataframe
   mean_df = pd.DataFrame(mean_list, columns = ['subject', 'fuzzer', 'data_type', 'time', 'data'])
-  
-  # save to file
+
   print("Saving mean logs into file...")
   mean_df.to_csv("mean_plot_data.csv", index=False)
 
@@ -67,8 +92,6 @@ def main(csv_file, put, runs, cut_off, step, out_file, fuzzers):
       axes[0].set_ylabel('#nodes')
     if key[1] == 'edges':
       axes[1].plot(grp['time'], grp['data'], label=key[0])
-      #axes[1].set_title('Edge coverage over time (%)')
-      axes[1].set_ylim([0,100])
       axes[1].set_xlabel('Time (in min)')
       axes[1].set_ylabel('#edges')
 
@@ -79,6 +102,8 @@ def main(csv_file, put, runs, cut_off, step, out_file, fuzzers):
 
   #Save to file
   plt.savefig(out_file)
+  plt.close(fig)
+  return 0
 
 # Parse the input arguments
 if __name__ == '__main__':
@@ -91,4 +116,14 @@ if __name__ == '__main__':
     parser.add_argument('-o','--out_file',type=str,required=True,help="Output file")
     parser.add_argument('-f','--fuzzers', nargs='+',required=True,help="List of fuzzers")
     args = parser.parse_args()
-    main(args.csv_file, args.put, args.runs, args.cut_off, args.step, args.out_file, args.fuzzers)
+    sys.exit(
+        main(
+            args.csv_file,
+            args.put,
+            args.runs,
+            args.cut_off,
+            args.step,
+            args.out_file,
+            args.fuzzers,
+        )
+    )

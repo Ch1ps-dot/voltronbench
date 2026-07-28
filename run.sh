@@ -190,9 +190,8 @@ EXPERIMENT_STATUS=$?
 printf 'experiment_status=%s\n' "$EXPERIMENT_STATUS" >> "$PARAMETERS_FILE"
 
 if [[ "$EXPERIMENT_STATUS" != "0" ]]; then
-    echo "Experiment execution failed with status $EXPERIMENT_STATUS; skipping analysis." >&2
-    echo "Partial raw results are retained in: $RUN_ROOT" >&2
-    exit "$EXPERIMENT_STATUS"
+    echo "Experiment execution completed with status $EXPERIMENT_STATUS." >&2
+    echo "Continuing with analysis and packaging of all available results." >&2
 fi
 
 BUNDLE_DIR="$PROJECT_ROOT/res_experiment_${RUN_ID}"
@@ -202,7 +201,7 @@ if ! mkdir "$BUNDLE_DIR"; then
 fi
 
 echo
-echo "Experiment execution completed. Starting automatic analysis."
+echo "Starting automatic analysis."
 
 ANALYSIS_STATUS=0
 "$PROJECT_ROOT/analyze.sh" \
@@ -228,5 +227,9 @@ echo "  $BUNDLE_ARCHIVE"
 
 if [[ "$ANALYSIS_STATUS" != "0" ]]; then
     echo "Warning: the archive was created, but one or more analyses failed." >&2
-    exit "$ANALYSIS_STATUS"
 fi
+
+if [[ "$EXPERIMENT_STATUS" != "0" ]]; then
+    exit "$EXPERIMENT_STATUS"
+fi
+exit "$ANALYSIS_STATUS"
