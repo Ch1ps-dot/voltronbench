@@ -82,7 +82,7 @@ stateafl_vanilla_options() {
             echo "-u /home/ubuntu/experiments/LightFTP/Source/Release/fftp"
             ;;
         lighttpd1)
-            echo "-u /home/ubuntu/experiments/lighttpd1/src/.libs/lighttpd"
+            echo "-u /home/ubuntu/experiments/lighttpd1-stateafl/src/lighttpd"
             ;;
     esac
 }

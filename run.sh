@@ -126,6 +126,24 @@ prepare_stateafl_kernel_settings() {
 
 prepare_stateafl_kernel_settings
 
+uses_voltron=0
+for fuzzer in ${FUZZER_LIST//,/ }; do
+    if [[ "$fuzzer" == "voltron" || "$fuzzer" == "all" ]]; then
+        uses_voltron=1
+        break
+    fi
+done
+
+if [[ "$uses_voltron" == "1" ]] \
+    && [[ "${VOLTRON_USE_API_GATEWAY:-1}" == "1" ]]; then
+    "$PWD/run_api_gateway.sh" start
+    export VOLTRON_USE_API_GATEWAY=1
+    export VOLTRON_DOCKER_NETWORK="${VOLTRON_DOCKER_NETWORK:-voltronbench}"
+    export VOLTRON_GATEWAY_BASE_URL="${VOLTRON_GATEWAY_BASE_URL:-http://voltron-api-gateway:8000/v1}"
+    export VOLTRON_GATEWAY_TOKEN="${VOLTRON_GATEWAY_TOKEN:-voltronbench-internal}"
+    export VOLTRON_GATEWAY_MODEL="${VOLTRON_GATEWAY_MODEL:-voltron-default}"
+fi
+
 cd "$PFBENCH"
 
-PFBENCH=$PFBENCH PATH=$PATH NUM_CONTAINERS=$NUM_CONTAINERS TIMEOUT=$TIMEOUT SKIPCOUNT=$SKIPCOUNT TEST_TIMEOUT=$TEST_TIMEOUT scripts/execution/profuzzbench_exec_all.sh ${TARGET_LIST} ${FUZZER_LIST}
+PFBENCH=$PFBENCH PATH=$PATH NUM_CONTAINERS=$NUM_CONTAINERS TIMEOUT=$TIMEOUT SKIPCOUNT=$SKIPCOUNT TEST_TIMEOUT=$TEST_TIMEOUT scripts/execution/profuzzbench_exec_all.sh "$TARGET_LIST" "$FUZZER_LIST"

@@ -24,6 +24,8 @@ RUN git clone https://github.com/stateafl/stateafl.git $STATEAFL && \
 ENV AFL_PATH=${STATEAFL}
 ENV PATH=${STATEAFL}:${PATH}
 
+COPY --chown=ubuntu:ubuntu forked-daapd.patch ${WORKDIR}/forked-daapd.patch
+
 # Dedicated instrumented version for StateAFL
 RUN cd $WORKDIR && \
     git clone https://github.com/ejurgensen/forked-daapd.git forked-daapd-stateafl && \
@@ -31,9 +33,12 @@ RUN cd $WORKDIR && \
     git checkout 2ca10d9 && \
     patch -p1 < $WORKDIR/forked-daapd.patch && \
     autoreconf -i && \
-    CC=${STATEAFL}/afl-clang-fast CFLAGS="-DSQLITE_CORE" ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --disable-mpd --disable-itunes --disable-lastfm --disable-spotify --disable-verification --disable-shared --enable-static && \
+    CC=${STATEAFL}/afl-clang-fast CFLAGS="-DSQLITE_CORE -DSTATEAFL_MANUAL_TRACE" ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --disable-mpd --disable-itunes --disable-lastfm --disable-spotify --disable-verification --disable-shared --enable-static && \
     make -C src/ SMARTPL2SQL.c SMARTPL.c DAAP2SQL.c DAAPLexer.c RSPLexer.c RSP2SQL.c && \
-    make clean all $MAKE_OPT
+    make clean all $MAKE_OPT && \
+    test -x src/forked-daapd
 
 COPY --chown=ubuntu:ubuntu in-daap-replay ${WORKDIR}/in-daap-replay
 COPY --chown=ubuntu:ubuntu run-stateafl.sh ${WORKDIR}/run-stateafl
+COPY --chown=ubuntu:ubuntu run.sh ${WORKDIR}/run
+COPY --chown=ubuntu:ubuntu cov_script.sh ${WORKDIR}/cov_script

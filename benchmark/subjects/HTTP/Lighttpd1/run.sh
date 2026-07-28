@@ -22,12 +22,46 @@ if $(strstr $FUZZER "afl") || $(strstr $FUZZER "llm"); then
     source ${WORKDIR}/run-${FUZZER}
   fi
 
+  TARGET_BINARY="${WORKDIR}/${TARGET_DIR}/src/lighttpd"
+  if [ ! -x "$TARGET_BINARY" ]; then
+    echo "ERROR: Lighttpd target binary is missing or not executable: $TARGET_BINARY" >&2
+    exit 2
+  fi
+  if [ "$FUZZER" = "stateafl" ]; then
+    if [ -z "${STATEAFL_TARGET_BINARY:-}" ]; then
+      echo "ERROR: StateAFL target binary was not configured by run-stateafl." >&2
+      exit 2
+    fi
+    if [ ! -x "$STATEAFL_TARGET_BINARY" ]; then
+      echo "ERROR: StateAFL target binary is missing or not executable: $STATEAFL_TARGET_BINARY" >&2
+      exit 2
+    fi
+  fi
+
   #Step-1. Do Fuzzing
   #Move to fuzzing folder
   cd $WORKDIR/${TARGET_DIR}/
-  timeout -k 2s --preserve-status $TIMEOUT /home/ubuntu/${FUZZER}/afl-fuzz -d -i ${INPUTS} -x ${WORKDIR}/http.dict -o $OUTDIR -N tcp://127.0.0.1/8080 $OPTIONS ./src/lighttpd -D -f ${WORKDIR}/lighttpd.conf -m $PWD/src/.libs
+  timeout -k 2s --preserve-status $TIMEOUT /home/ubuntu/${FUZZER}/afl-fuzz -d -i ${INPUTS} -x ${WORKDIR}/http.dict -o $OUTDIR -N tcp://127.0.0.1/8080 $OPTIONS "$TARGET_BINARY" -D -f ${WORKDIR}/lighttpd.conf -m $PWD/src/.libs
 
   STATUS=$?
+  OUTPUT_PATH="${WORKDIR}/${TARGET_DIR}/${OUTDIR}"
+
+  if [ ! -d "$OUTPUT_PATH" ]; then
+    echo "ERROR: Fuzzer exited without creating its output directory: $OUTPUT_PATH" >&2
+    if [ "$STATUS" -eq 0 ]; then
+      STATUS=1
+    fi
+    exit "$STATUS"
+  fi
+
+  if [ "$FUZZER" = "stateafl" ] && [ ! -d "$OUTPUT_PATH/replayable-queue" ]; then
+    echo "ERROR: StateAFL output is missing replayable-queue; skipping coverage replay." >&2
+    tar -zcvf "${WORKDIR}/${OUTDIR}.tar.gz" "$OUTDIR"
+    if [ "$STATUS" -eq 0 ]; then
+      STATUS=1
+    fi
+    exit "$STATUS"
+  fi
 
   #Step-2. Collect code coverage over time
   #Move to gcov folder
@@ -45,8 +79,8 @@ if $(strstr $FUZZER "afl") || $(strstr $FUZZER "llm"); then
   cd $WORKDIR/lighttpd1-gcov
   #copy .hh files since gcovr could not detect them
 
-  gcovr -r .. --html --html-details -o index.html
-  mkdir ${WORKDIR}/${TARGET_DIR}/${OUTDIR}/cov_html/
+  gcovr -r .. --exclude 'src/t/' --html --html-details -o index.html
+  mkdir -p ${WORKDIR}/${TARGET_DIR}/${OUTDIR}/cov_html/
   cp *.html ${WORKDIR}/${TARGET_DIR}/${OUTDIR}/cov_html/
 
   #Step-3. Save the result to the ${WORKDIR} folder

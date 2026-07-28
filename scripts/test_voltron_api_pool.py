@@ -57,8 +57,6 @@ def make_request(
         {
             "model": profile["model"],
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 1,
-            "temperature": 0,
             "stream": False,
         }
     ).encode("utf-8")

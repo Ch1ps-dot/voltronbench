@@ -23,7 +23,8 @@ RUN cd $WORKDIR && \
     git checkout 9f38b63cae3e2 && \
     ./autogen.sh && \
     CC=${STATEAFL}/afl-clang-fast CXX=${STATEAFL}/afl-clang-fast++ ./configure --enable-static --disable-shared && \
-    make clean all $MAKE_OPT
+    make clean all $MAKE_OPT && \
+    test -x src/lighttpd
 
 # StateAFL consumes replayable seeds: a 32-bit message length followed by data.
 RUN mkdir ${WORKDIR}/in-http-replay && \
@@ -33,3 +34,5 @@ RUN mkdir ${WORKDIR}/in-http-replay && \
     done
 
 COPY --chown=ubuntu:ubuntu run-stateafl.sh ${WORKDIR}/run-stateafl
+COPY --chown=ubuntu:ubuntu run.sh ${WORKDIR}/run
+COPY --chown=ubuntu:ubuntu cov_script.sh ${WORKDIR}/cov_script

@@ -62,6 +62,7 @@ chmod 0777 "$UV_CACHE"
 VOLTRON_LLM_CONFIG=${VOLTRON_LLM_CONFIG:-"$ROOT/config/voltron-llm.yaml"}
 VOLTRON_KEY_POOL_COUNTER=${VOLTRON_LLM_API_KEY_COUNTER:-"$ROOT/.runtime/voltron/api-profile-counter"}
 VOLTRON_KEY_POOL_LOCK="${VOLTRON_KEY_POOL_COUNTER}.lock"
+VOLTRON_USE_API_GATEWAY=${VOLTRON_USE_API_GATEWAY:-0}
 voltron_llm_profiles=()
 
 load_llm_profiles() {
@@ -106,7 +107,9 @@ select_llm_profile() {
   } 8>"$VOLTRON_KEY_POOL_LOCK"
 }
 
-load_llm_profiles
+if [ "$VOLTRON_USE_API_GATEWAY" != "1" ]; then
+  load_llm_profiles
+fi
 
 for i in $(seq 1 "$RUNS"); do
   docker_args=(
@@ -117,12 +120,21 @@ for i in $(seq 1 "$RUNS"); do
     -e UV_CACHE_DIR=/home/ubuntu/.cache/uv
     -e UV_PYTHON_INSTALL_DIR=/home/ubuntu/.cache/uv/python
   )
+  if [ "$VOLTRON_USE_API_GATEWAY" = "1" ]; then
+    docker_args+=(
+      --network "${VOLTRON_DOCKER_NETWORK:-voltronbench}"
+      -e "VOLTRON_LLM_BASE_URL=${VOLTRON_GATEWAY_BASE_URL:-http://voltron-api-gateway:8000/v1}"
+      -e "VOLTRON_LLM_API_KEY=${VOLTRON_GATEWAY_TOKEN:-voltronbench-internal}"
+      -e "VOLTRON_LLM_MODEL=${VOLTRON_GATEWAY_MODEL:-voltron-default}"
+    )
+  fi
   for env_name in VOLTRON_STATS_INTERVAL VOLTRON_COMPLIANCE_ANALYZER; do
     if [ -n "${!env_name:-}" ]; then
       docker_args+=(-e "${env_name}=${!env_name}")
     fi
   done
-  if [ "${#voltron_llm_profiles[@]}" -gt 0 ]; then
+  if [ "$VOLTRON_USE_API_GATEWAY" != "1" ] \
+    && [ "${#voltron_llm_profiles[@]}" -gt 0 ]; then
     profile_index=$(select_llm_profile)
     profile_offset=$((profile_index * 3))
     docker_args+=(

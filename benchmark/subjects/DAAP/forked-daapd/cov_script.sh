@@ -10,7 +10,9 @@ fmode=$5    #file mode -- structured or not
             #fmode = 1: the test case is a structured file keeping several request messages
 
 #delete the existing coverage file
-rm $covfile > /dev/null 2>&1; touch $covfile
+mkdir -p "$(dirname "$covfile")"
+rm -f "$covfile"
+touch "$covfile"
 
 #clear gcov data
 gcovr -r forked-daapd-gcov -s -d > /dev/null 2>&1
@@ -30,7 +32,9 @@ else
 fi
 
 #process initial seed corpus first
-for f in $(echo $folder/$testdir/*.raw); do 
+shopt -s nullglob
+seed_files=("$folder/$testdir/"*.raw)
+for f in "${seed_files[@]}"; do
   time=$(stat -c %Y $f)
 
   (sleep 1 && $replayer $f HTTP $pno 100 10000 > /dev/null 2>&1) &
@@ -48,7 +52,10 @@ done
 
 #process fuzzer-generated testcases
 count=0
-for f in $(echo $folder/$testdir/id*); do 
+last_testcase=""
+testcases=("$folder/$testdir/"id*)
+for f in "${testcases[@]}"; do
+  last_testcase=$f
   time=$(stat -c %Y $f)
 
   (sleep 1 && $replayer $f HTTP $pno 100 10000 > /dev/null 2>&1) &
@@ -68,9 +75,9 @@ for f in $(echo $folder/$testdir/id*); do
 done
 
 #ouput cov data for the last testcase(s) if step > 1
-if [[ $step -gt 1 ]]
+if [[ $step -gt 1 && -n "$last_testcase" ]]
 then
-  time=$(stat -c %Y $f)
+  time=$(stat -c %Y "$last_testcase")
   cov_data=$(gcovr -r forked-daapd-gcov -s | grep "[lb][a-z]*:")
   l_per=$(echo "$cov_data" | grep lines | cut -d" " -f2 | rev | cut -c2- | rev)
   l_abs=$(echo "$cov_data" | grep lines | cut -d" " -f3 | cut -c2-)

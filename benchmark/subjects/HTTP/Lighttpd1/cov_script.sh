@@ -10,7 +10,9 @@ fmode=$5    #file mode -- structured or not
             #fmode = 1: the test case is a structured file keeping several request messages
 
 #delete the existing coverage file
-rm $covfile; touch $covfile
+mkdir -p "$(dirname "$covfile")"
+rm -f "$covfile"
+touch "$covfile"
 
 #clear gcov data
 gcovr -r .. -s -d > /dev/null 2>&1
@@ -29,8 +31,11 @@ else
   replayer="afl-replay"
 fi
 
+shopt -s nullglob
+
 #process initial seed corpus first
-for f in $(echo $folder/$testdir/*.raw); do 
+seed_files=("$folder/$testdir/"*.raw)
+for f in "${seed_files[@]}"; do
   time=$(stat -c %Y $f)
 
   #terminate running server(s)
@@ -40,7 +45,7 @@ for f in $(echo $folder/$testdir/*.raw); do
   timeout -k 1s -s SIGUSR1 3s ./src/lighttpd -D -f ${WORKDIR}/lighttpd.conf -m $PWD/src/.libs > /dev/null 2>&1
 
   wait
-  cov_data=$(gcovr -r src -s | grep "[lb][a-z]*:")
+  cov_data=$(gcovr -r src --exclude 't/' -s | grep "[lb][a-z]*:")
   l_per=$(echo "$cov_data" | grep lines | cut -d" " -f2 | rev | cut -c2- | rev)
   l_abs=$(echo "$cov_data" | grep lines | cut -d" " -f3 | cut -c2-)
   b_per=$(echo "$cov_data" | grep branch | cut -d" " -f2 | rev | cut -c2- | rev)
@@ -51,7 +56,10 @@ done
 
 #process other testcases
 count=0
-for f in $(echo $folder/$testdir/id*); do 
+last_testcase=""
+testcases=("$folder/$testdir/"id*)
+for f in "${testcases[@]}"; do
+  last_testcase=$f
   time=$(stat -c %Y $f)
 
   #terminate running server(s)
@@ -64,7 +72,7 @@ for f in $(echo $folder/$testdir/id*); do
   count=$(expr $count + 1)
   rem=$(expr $count % $step)
   if [ "$rem" != "0" ]; then continue; fi
-  cov_data=$(gcovr -r src -s | grep "[lb][a-z]*:")
+  cov_data=$(gcovr -r src --exclude 't/' -s | grep "[lb][a-z]*:")
   l_per=$(echo "$cov_data" | grep lines | cut -d" " -f2 | rev | cut -c2- | rev)
   l_abs=$(echo "$cov_data" | grep lines | cut -d" " -f3 | cut -c2-)
   b_per=$(echo "$cov_data" | grep branch | cut -d" " -f2 | rev | cut -c2- | rev)
@@ -74,10 +82,10 @@ for f in $(echo $folder/$testdir/id*); do
 done
 
 #ouput cov data for the last testcase(s) if step > 1
-if [[ $step -gt 1 ]]
+if [[ $step -gt 1 && -n "$last_testcase" ]]
 then
-  time=$(stat -c %Y $f)
-  cov_data=$(gcovr -r src -s | grep "[lb][a-z]*:")
+  time=$(stat -c %Y "$last_testcase")
+  cov_data=$(gcovr -r src --exclude 't/' -s | grep "[lb][a-z]*:")
   l_per=$(echo "$cov_data" | grep lines | cut -d" " -f2 | rev | cut -c2- | rev)
   l_abs=$(echo "$cov_data" | grep lines | cut -d" " -f3 | cut -c2-)
   b_per=$(echo "$cov_data" | grep branch | cut -d" " -f2 | rev | cut -c2- | rev)

@@ -86,6 +86,7 @@ live555 kamailio exim forked-daapd pure-ftpd proftpd bftpd lightftp lighttpd1
 - Docker
 - Bash
 - Git
+- Python 3 with `rich` for the live container dashboard
 - Python 3 with `pandas` and `matplotlib` for result analysis
 - Network access while building StateAFL images or fetching Voltron
 
@@ -258,36 +259,62 @@ tracked example and keep the real configuration local:
 cp config/voltron-llm.example.yaml config/voltron-llm.yaml
 ```
 
-Configure one or more complete API profiles:
+Configure one or more complete API profiles and set a hard concurrency limit
+for each profile:
 
 ```yaml
+gateway:
+  queue_size: 256
+  queue_timeout_seconds: 30
+  max_attempts: 2
+  default_max_concurrency: 1
+
 profiles:
-  - base_url: https://api.example.com/v1
+  - name: api-1
+    base_url: https://api.example.com/v1
     api_key: sk-key-1
     model: example-model
+    max_concurrency: 6
 
-  - base_url: https://api.example.com/v1
+  - name: api-2
+    base_url: https://api.example.com/v1
     api_key: sk-key-2
     model: example-model
+    max_concurrency: 8
 ```
 
-Each Voltron container receives one complete profile in round-robin order. The
-counter is shared by concurrently launched targets, so this command distributes
-all six containers across the configured profiles:
+`run.sh` starts the `voltron-api-gateway` container when a Voltron experiment
+is requested. All Voltron containers connect to this gateway. For every request,
+the gateway selects an enabled, non-cooled-down profile with available capacity,
+preferring the lowest `inflight / max_concurrency` ratio. Selection and slot
+reservation are atomic, so a profile never exceeds its configured hard limit.
+When every profile is full, requests wait in the bounded gateway queue.
 
 ```bash
 ./run.sh 2 60 lightftp,bftpd,proftpd voltron
 ```
 
 Use a configuration stored elsewhere with
-`VOLTRON_LLM_CONFIG=/path/to/voltron-llm.yaml`. API settings are accepted only
-through this YAML file so concurrent experiments always select a complete,
-internally consistent profile.
+`VOLTRON_GATEWAY_CONFIG=/path/to/voltron-llm.yaml`. API settings are accepted
+only through this YAML file so each upstream always receives a complete,
+internally consistent profile. If `max_concurrency` is omitted, the gateway
+uses `gateway.default_max_concurrency`, whose safe default is `1`.
 
-The shared round-robin counter is
-`.runtime/voltron/api-profile-counter`. Override it with
-`VOLTRON_LLM_API_KEY_COUNTER=/path/to/counter`, or remove the counter file to
-restart assignment from the first profile.
+Manage or inspect the gateway independently with:
+
+```bash
+./run_api_gateway.sh start
+./run_api_gateway.sh status
+./run_api_gateway.sh logs
+./run_api_gateway.sh stop
+```
+
+The gateway exposes `healthz`, `readyz`, and an authenticated `admin/status`
+endpoint on `127.0.0.1:8000`. It does not include upstream keys in status
+responses. Set `FORCE_GATEWAY_REBUILD=1` when gateway source or dependencies
+change, and restart the gateway after changing its YAML configuration. Set
+`VOLTRON_USE_API_GATEWAY=0` to use the legacy per-container round-robin profile
+assignment.
 
 Test the concurrency capacity of every API profile before an experiment:
 
@@ -351,20 +378,31 @@ code coverage remains experimental, so the runner preserves the
 
 ## Progress Monitoring
 
-All fuzzer runners use a host-side Docker monitor. The monitor does not inspect
-internal fuzzer state; it only reports elapsed time, remaining time, and Docker
-container status.
+All fuzzer runners use a host-side Python Rich dashboard. The live table shows
+the experiment progress, elapsed and remaining time, and one row per Docker
+container with its status, runtime, exit code, CPU usage, memory usage, process
+count, and abnormal-exit note. The dashboard is transient while an experiment
+is running; a final static summary remains in the terminal after all containers
+stop. Narrow terminals use a compact table; terminals at least 110 columns wide
+also show container names, absolute memory usage, and process counts.
 
-Default behavior prints periodic status blocks. Useful options:
+Install the dashboard dependency through `./deps.sh`, or install it directly:
+
+```bash
+python3 -m pip install rich
+```
+
+Useful options:
 
 ```bash
 PROFUZZBENCH_MONITOR=0                  # Disable monitoring
 PROFUZZBENCH_MONITOR_INTERVAL=2         # Refresh every 2 seconds
-PROFUZZBENCH_MONITOR_DASHBOARD=1        # Use a clearing dashboard view
+PROFUZZBENCH_MONITOR_DASHBOARD=1        # Use Rich's full-screen dashboard
 ```
 
-The dashboard mode is best for a single foreground experiment. For multiple
-parallel target/fuzzer runs, the default periodic output is easier to read.
+The default Rich live region is best for normal foreground runs. Full-screen
+mode is useful for a single target/fuzzer job. When several target/fuzzer jobs
+run in parallel, each job owns its own live table and final summary.
 
 ## Interrupt Handling
 
@@ -477,10 +515,17 @@ docker ps -a
 docker logs <container_id>
 ```
 
+Stop running experiment and API-gateway containers without deleting them:
+
+```bash
+./clean_containers.sh
+```
+
 Force image rebuilds if a Docker image is stale:
 
 ```bash
 FORCE_REBUILD=1 ./setup.sh
+FORCE_GATEWAY_REBUILD=1 ./run_api_gateway.sh restart
 ```
 
 Clear cached Voltron snapshots if a local experiment should start fresh:
