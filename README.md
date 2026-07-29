@@ -27,11 +27,57 @@ find benchmark/experiment-runs -name 'out-lightftp-stateafl_1.tar.gz'
 ls res_experiment_*.tar.gz
 ```
 
-Run AFLNet or ChatAFL with the same entry point:
+Run AFLNet with the same entry point:
 
 ```bash
 ./run.sh 1 5 lightftp aflnet
+```
+
+ChatAFL and Voltron require an OpenAI-compatible API profile. Copy the ignored
+local configuration and restrict its permissions:
+
+```bash
+cp config/voltron-llm.example.yaml config/voltron-llm.yaml
+chmod 600 config/voltron-llm.yaml
+```
+
+Edit `config/voltron-llm.yaml`:
+
+```yaml
+gateway:
+  queue_size: 256
+  queue_timeout_seconds: 30
+  max_attempts: 2
+  default_max_concurrency: 1
+
+profiles:
+  - name: primary
+    base_url: https://api.example.com/v1
+    api_key: replace-with-your-api-key
+    model: gpt-5-mini
+    max_concurrency: 1
+    enabled: true
+```
+
+`base_url` is the OpenAI-compatible `/v1` prefix; do not append
+`/chat/completions`. The gateway adds that path automatically. Add more
+complete entries under `profiles` when several API accounts or endpoints are
+available, and set `max_concurrency` to each provider's safe hard limit.
+
+Run ChatAFL or Voltron with the same configuration:
+
+```bash
 ./run.sh 1 5 lightftp chatafl
+./run.sh 1 30 lightftp voltron
+```
+
+`run.sh` starts the shared API gateway automatically. Real upstream keys stay
+in the ignored local YAML and are not injected into ChatAFL or Voltron target
+containers. If the gateway is already running when the YAML is changed, reload
+it before the next experiment:
+
+```bash
+./run_api_gateway.sh restart
 ```
 
 `run.sh` automatically generates coverage and state plots after all experiment
@@ -47,15 +93,6 @@ To run several active targets and fuzzers together:
 
 ```bash
 ./run.sh 1 30 lightftp,bftpd,proftpd aflnet,chatafl,stateafl
-```
-
-Voltron runs use the same subject names and output layout, but require a local
-LLM profile in `config/voltron-llm.yaml`:
-
-```bash
-cp config/voltron-llm.example.yaml config/voltron-llm.yaml
-# Edit config/voltron-llm.yaml with your local API profile.
-./run.sh 1 30 lightftp voltron
 ```
 
 All quick-start commands use the active target set only:
@@ -155,27 +192,40 @@ Examples:
 
 ```bash
 ./run.sh 1 30 lightftp voltron
-CHATAFL_MODEL=gpt-4.1 \
-CHATAFL_URL=https://api.example.com/v1/chat/completions \
-CHATAFL_API_KEY_FILE=/secure/path/chatafl-api-key \
 ./run.sh 1 30 lightftp chatafl
-CHATAFL_MODEL=gpt-4.1 \
-  ./run.sh 3 240 bftpd,proftpd,pure-ftpd aflnet,chatafl,stateafl,voltron
+./run.sh 3 240 bftpd,proftpd,pure-ftpd aflnet,chatafl,stateafl,voltron
 ```
+
+ChatAFL and Voltron use the same capacity-aware API gateway by default. Copy
+the tracked example, then place complete upstream URL, API key, model, and
+capacity profiles in the ignored local configuration:
+
+```bash
+cp config/voltron-llm.example.yaml config/voltron-llm.yaml
+```
+
+The ChatAFL container receives only the internal gateway endpoint, the
+`voltron-default` placeholder model, and a temporary mode-`0600` gateway-token
+file. The gateway replaces them with the selected profile's real URL, API key,
+and model for each request. Upstream credentials are not passed through Docker
+environment variables or written to experiment metadata.
 
 When ChatAFL is selected, `run.sh` compiles a small runtime `afl-fuzz` artifact
 inside the existing `lightftp-vol` image, caches it under
 `.runtime/chatafl/`, and mounts it over `/home/ubuntu/chatafl/afl-fuzz` in each
 ChatAFL container. It does not run `docker build` or modify any target image.
-Changing `CHATAFL_MODEL`, `CHATAFL_URL`, or the API key reuses the cached
-binary:
+Changing the gateway YAML does not rebuild this cached binary; restart the
+gateway to reload changed profiles.
+
+Set `CHATAFL_USE_API_GATEWAY=0` to retain the direct-call compatibility path.
+In direct mode, model, complete chat-completions URL, and API key can still be
+selected at runtime without rebuilding an image:
 
 ```bash
-CHATAFL_MODEL=model-a CHATAFL_URL=https://api-a.example/v1/chat/completions \
+CHATAFL_USE_API_GATEWAY=0 \
+  CHATAFL_MODEL=model-a \
+  CHATAFL_URL=https://api-a.example/v1/chat/completions \
   CHATAFL_API_KEY_FILE=/secure/path/key-a \
-  ./run.sh 1 30 lightftp chatafl
-CHATAFL_MODEL=model-b CHATAFL_URL=https://api-b.example/v1/chat/completions \
-  CHATAFL_API_KEY_FILE=/secure/path/key-b \
   ./run.sh 1 30 lightftp chatafl
 ```
 
@@ -188,8 +238,8 @@ install -m 600 /dev/null .runtime/chatafl-api-key
 printf '%s' 'replace-with-the-key' > .runtime/chatafl-api-key
 ```
 
-For compatibility, `CHATAFL_API_KEY=...` is also accepted by `run.sh`. It is
-immediately copied to a temporary mode-`0600` file under
+For direct-mode compatibility, `CHATAFL_API_KEY=...` is also accepted by
+`run.sh`. It is immediately copied to a temporary mode-`0600` file under
 `.runtime/chatafl/secrets/`, removed from the child environment, mounted
 read-only into ChatAFL containers, and deleted when `run.sh` exits. The key
 itself is never written to experiment metadata or passed as a Docker
@@ -200,13 +250,12 @@ the compatible Ubuntu 20.04 builder:
 
 ```bash
 CHATAFL_BUILDER_IMAGE=proftpd-vol \
-CHATAFL_MODEL=gpt-4.1 \
 ./run.sh 1 30 proftpd chatafl
 ```
 
-Unset runtime values fall back to the model, URL, or API key already compiled
-into an existing builder image. Newly built images retain the tracked
-placeholders, so explicit runtime settings are recommended for experiments.
+In direct mode only, unset runtime values fall back to the model, URL, or API
+key already compiled into an existing builder image. Newly built images retain
+the tracked placeholders, so explicit direct-mode settings are recommended.
 
 Supported fuzzer names are:
 
@@ -239,9 +288,10 @@ res_experiment_<run-id>.tar.gz
 The archive contains the experiment parameters and one timestamped analysis
 directory per subject. Each subject directory includes the original run
 archives, generated CSV files, and coverage/state plots. ChatAFL runs add the
-effective model, URL, API-key source (never the key), runtime source hash,
-binary hash, and builder-image ID to `experiment_parameters.txt`; each
-`results-<subject>` directory also contains
+API mode, effective model, URL, API-key source (never the key), runtime source
+hash, binary hash, and builder-image ID to `experiment_parameters.txt`.
+Gateway-backed runs also record the gateway-configuration hash and unique
+profile model names. Each `results-<subject>` directory also contains
 `chatafl_runtime_metadata.txt`. The unique run ID prevents sequential or
 concurrent `run.sh` invocations from overwriting each other's raw archives,
 analysis files, or combined bundles.
@@ -324,8 +374,9 @@ VOLTRON_REPO=https://github.com/your-org/voltron.git \
 ./run.sh 1 30 lightftp voltron
 ```
 
-Voltron reads its API settings from `config/voltron-llm.yaml`. Start from the
-tracked example and keep the real configuration local:
+The shared ChatAFL/Voltron gateway reads its API settings from
+`config/voltron-llm.yaml`. Start from the tracked example and keep the real
+configuration local:
 
 ```bash
 cp config/voltron-llm.example.yaml config/voltron-llm.yaml
@@ -355,12 +406,13 @@ profiles:
     max_concurrency: 8
 ```
 
-`run.sh` starts the `voltron-api-gateway` container when a Voltron experiment
-is requested. All Voltron containers connect to this gateway. For every request,
-the gateway selects an enabled, non-cooled-down profile with available capacity,
-preferring the lowest `inflight / max_concurrency` ratio. Selection and slot
-reservation are atomic, so a profile never exceeds its configured hard limit.
-When every profile is full, requests wait in the bounded gateway queue.
+`run.sh` starts the `voltron-api-gateway` container when a ChatAFL or Voltron
+experiment requests gateway mode. All gateway-backed ChatAFL and Voltron
+containers connect to it. For every request, the gateway selects an enabled,
+non-cooled-down profile with available capacity, preferring the lowest
+`inflight / max_concurrency` ratio. Selection and slot reservation are atomic,
+so a profile never exceeds its configured hard limit. When every profile is
+full, requests wait in the bounded gateway queue.
 
 ```bash
 ./run.sh 2 60 lightftp,bftpd,proftpd voltron
@@ -386,7 +438,12 @@ endpoint on `127.0.0.1:8000`. It does not include upstream keys in status
 responses. Set `FORCE_GATEWAY_REBUILD=1` when gateway source or dependencies
 change, and restart the gateway after changing its YAML configuration. Set
 `VOLTRON_USE_API_GATEWAY=0` to use the legacy per-container round-robin profile
-assignment.
+assignment for Voltron, or `CHATAFL_USE_API_GATEWAY=0` to use ChatAFL's direct
+runtime API settings.
+
+When ChatAFL and Voltron run simultaneously, they intentionally share the same
+upstream capacity and can affect each other's API wait time. Run comparison
+experiments separately when API latency isolation is required.
 
 Test the concurrency capacity of every API profile before an experiment:
 

@@ -19,7 +19,7 @@ Environment:
   VOLTRON_GATEWAY_CONFIG      Gateway/profile YAML file
   VOLTRON_GATEWAY_TOKEN       Token accepted from experiment containers
   VOLTRON_GATEWAY_HOST_PORT   Host port for status and local clients
-  VOLTRON_DOCKER_NETWORK      Docker network shared with Voltron containers
+  VOLTRON_DOCKER_NETWORK      Docker network shared with LLM client containers
   FORCE_GATEWAY_REBUILD=1     Rebuild the gateway image before starting
 EOF
 }

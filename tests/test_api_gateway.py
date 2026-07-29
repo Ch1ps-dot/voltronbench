@@ -143,6 +143,56 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chatafl_chat_completion_payload_is_compatible(
+        self,
+    ) -> None:
+        forwarded_payload = {}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            forwarded_payload.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "ChatAFL-compatible response",
+                            }
+                        }
+                    ]
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        app = GatewayApplication(
+            GatewaySettings(access_token="test-token"),
+            [profiles()[0]],
+            client=client,
+        )
+        status, _headers, body = await call_asgi(
+            app,
+            payload={
+                "model": "voltron-default",
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "Generate a protocol message."},
+                ],
+                "max_tokens": 4096,
+                "temperature": 0.5,
+            },
+        )
+        await client.aclose()
+
+        self.assertEqual(status, 200)
+        self.assertEqual(forwarded_payload["model"], "model-1")
+        self.assertEqual(forwarded_payload["max_tokens"], 4096)
+        self.assertEqual(forwarded_payload["temperature"], 0.5)
+        self.assertEqual(
+            json.loads(body)["choices"][0]["message"]["content"],
+            "ChatAFL-compatible response",
+        )
+
     async def test_concurrent_proxy_never_exceeds_profile_limits(self) -> None:
         active = {"key-1": 0, "key-2": 0}
         maximum = {"key-1": 0, "key-2": 0}

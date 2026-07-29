@@ -56,10 +56,19 @@ def load_profiles(config_path: Path) -> list[dict[str, str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--models-only",
+        action="store_true",
+        help="print a comma-separated list of unique profile models",
+    )
     parser.add_argument("config", type=Path)
     args = parser.parse_args()
 
     profiles = load_profiles(args.config)
+    if args.models_only:
+        print(",".join(dict.fromkeys(profile["model"] for profile in profiles)))
+        return
+
     for profile in profiles:
         for field in FIELDS:
             encoded = base64.b64encode(profile[field].encode("utf-8"))

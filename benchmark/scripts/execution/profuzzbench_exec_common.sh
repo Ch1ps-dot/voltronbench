@@ -36,6 +36,18 @@ metadata_value() {
 }
 
 if [[ "$FUZZER" == "chatafl" ]]; then
+  CHATAFL_USE_API_GATEWAY=${CHATAFL_USE_API_GATEWAY:-0}
+  if [[ "$CHATAFL_USE_API_GATEWAY" != "0" \
+    && "$CHATAFL_USE_API_GATEWAY" != "1" ]]; then
+    printf 'CHATAFL_USE_API_GATEWAY must be either 0 or 1.\n' >&2
+    exit 1
+  fi
+  CHATAFL_API_MODE="${CHATAFL_API_MODE:-direct}"
+  if [[ "$CHATAFL_USE_API_GATEWAY" == "1" ]]; then
+    CHATAFL_API_MODE=gateway
+    CHATAFL_DOCKER_NETWORK="${CHATAFL_DOCKER_NETWORK:-voltronbench}"
+  fi
+
   if [[ -z "${CHATAFL_RUNTIME_BINARY:-}" ]]; then
     CHATAFL_RUNTIME_BINARY=$(
       "$PROJECT_ROOT/scripts/prepare_chatafl_runtime.sh" \
@@ -100,7 +112,11 @@ if [[ "$FUZZER" == "chatafl" ]]; then
       printf 'ChatAFL API key file must not be accessible by group or others.\n' >&2
       exit 1
     fi
-    CHATAFL_API_KEY_SOURCE=runtime_secret_file
+    if [[ "$CHATAFL_API_MODE" == "gateway" ]]; then
+      CHATAFL_API_KEY_SOURCE=gateway_internal_token
+    else
+      CHATAFL_API_KEY_SOURCE=runtime_secret_file
+    fi
   fi
 
   mkdir -p "$SAVETO"
@@ -108,9 +124,16 @@ if [[ "$FUZZER" == "chatafl" ]]; then
     sha256sum "$CHATAFL_RUNTIME_BINARY" | cut -d ' ' -f 1
   )
   {
+    printf 'api_mode=%s\n' "$CHATAFL_API_MODE"
     printf 'effective_model=%s\n' "$CHATAFL_MODEL_EFFECTIVE"
     printf 'effective_url=%s\n' "$CHATAFL_URL_EFFECTIVE"
     printf 'api_key_source=%s\n' "$CHATAFL_API_KEY_SOURCE"
+    if [[ "$CHATAFL_API_MODE" == "gateway" ]]; then
+      printf 'gateway_config_sha256=%s\n' \
+        "${LLM_GATEWAY_CONFIG_SHA256:-unknown}"
+      printf 'gateway_profile_models=%s\n' \
+        "${LLM_GATEWAY_PROFILE_MODELS:-unknown}"
+    fi
     printf 'runtime_binary_sha256=%s\n' \
       "$CHATAFL_RUNTIME_BINARY_SHA256"
     if [[ -f "$CHATAFL_RUNTIME_METADATA" ]]; then
@@ -159,6 +182,9 @@ trap handle_interrupt INT TERM
 for i in $(seq 1 $RUNS); do
   docker_args=(run --cpus=1 -d -it)
   if [[ "$FUZZER" == "chatafl" ]]; then
+    if [[ "$CHATAFL_USE_API_GATEWAY" == "1" ]]; then
+      docker_args+=(--network "$CHATAFL_DOCKER_NETWORK")
+    fi
     docker_args+=(
       --mount "type=bind,src=${CHATAFL_RUNTIME_BINARY},dst=/home/ubuntu/chatafl/afl-fuzz,readonly"
       --env "CHATAFL_MODEL=${CHATAFL_MODEL_EFFECTIVE}"

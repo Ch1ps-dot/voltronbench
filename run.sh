@@ -148,7 +148,121 @@ for fuzzer in ${FUZZER_LIST//,/ }; do
     fi
 done
 
+uses_voltron=0
+for fuzzer in ${FUZZER_LIST//,/ }; do
+    if [[ "$fuzzer" == "voltron" || "$fuzzer" == "all" ]]; then
+        uses_voltron=1
+        break
+    fi
+done
+
+CHATAFL_USE_API_GATEWAY=${CHATAFL_USE_API_GATEWAY:-1}
+VOLTRON_USE_API_GATEWAY=${VOLTRON_USE_API_GATEWAY:-1}
+
+validate_gateway_switch() {
+    local name=$1
+    local value=$2
+
+    if [[ "$value" != "0" && "$value" != "1" ]]; then
+        printf '%s must be either 0 or 1.\n' "$name" >&2
+        exit 1
+    fi
+}
+
+if [[ "$uses_chatafl" == "1" ]]; then
+    validate_gateway_switch CHATAFL_USE_API_GATEWAY \
+        "$CHATAFL_USE_API_GATEWAY"
+    export CHATAFL_USE_API_GATEWAY
+fi
+if [[ "$uses_voltron" == "1" ]]; then
+    validate_gateway_switch VOLTRON_USE_API_GATEWAY \
+        "$VOLTRON_USE_API_GATEWAY"
+    export VOLTRON_USE_API_GATEWAY
+fi
+
+uses_api_gateway=0
+if [[ "$uses_chatafl" == "1" \
+    && "$CHATAFL_USE_API_GATEWAY" == "1" ]] \
+    || [[ "$uses_voltron" == "1" \
+    && "$VOLTRON_USE_API_GATEWAY" == "1" ]]; then
+    uses_api_gateway=1
+    export VOLTRON_DOCKER_NETWORK="${VOLTRON_DOCKER_NETWORK:-voltronbench}"
+    export VOLTRON_GATEWAY_BASE_URL="${VOLTRON_GATEWAY_BASE_URL:-http://voltron-api-gateway:8000/v1}"
+    export VOLTRON_GATEWAY_TOKEN="${VOLTRON_GATEWAY_TOKEN:-voltronbench-internal}"
+    export VOLTRON_GATEWAY_MODEL="${VOLTRON_GATEWAY_MODEL:-voltron-default}"
+    if [[ "$VOLTRON_GATEWAY_TOKEN" == *$'\n'* \
+        || "$VOLTRON_GATEWAY_TOKEN" == *$'\r'* ]]; then
+        echo "VOLTRON_GATEWAY_TOKEN must not contain a newline." >&2
+        exit 1
+    fi
+    LLM_GATEWAY_CONFIG_EFFECTIVE="${VOLTRON_GATEWAY_CONFIG:-$PROJECT_ROOT/config/voltron-llm.yaml}"
+    if [[ ! -r "$LLM_GATEWAY_CONFIG_EFFECTIVE" ]]; then
+        echo "Gateway configuration is not readable: $LLM_GATEWAY_CONFIG_EFFECTIVE" >&2
+        exit 1
+    fi
+    LLM_GATEWAY_CONFIG_SHA256=$(
+        sha256sum "$LLM_GATEWAY_CONFIG_EFFECTIVE" | cut -d ' ' -f 1
+    )
+    LLM_GATEWAY_PROFILE_MODELS=$(
+        python3 "$PROJECT_ROOT/scripts/load_voltron_llm_config.py" \
+            --models-only "$LLM_GATEWAY_CONFIG_EFFECTIVE"
+    )
+    export LLM_GATEWAY_CONFIG_SHA256
+    export LLM_GATEWAY_PROFILE_MODELS
+fi
+
+write_chatafl_ephemeral_secret() {
+    local secret_value=$1
+    local file_prefix=$2
+    local secret_root="$PROJECT_ROOT/.runtime/chatafl/secrets"
+
+    if ! mkdir -p "$secret_root" || ! chmod 0700 "$secret_root"; then
+        echo "Unable to prepare the ChatAFL secret directory." >&2
+        exit 1
+    fi
+    if ! CHATAFL_EPHEMERAL_API_KEY_FILE=$(
+        mktemp "$secret_root/${file_prefix}.XXXXXX"
+    ); then
+        echo "Unable to create the temporary ChatAFL secret file." >&2
+        exit 1
+    fi
+    if ! chmod 0600 "$CHATAFL_EPHEMERAL_API_KEY_FILE" \
+        || ! printf '%s' "$secret_value" \
+            > "$CHATAFL_EPHEMERAL_API_KEY_FILE"; then
+        echo "Unable to write the temporary ChatAFL secret file." >&2
+        exit 1
+    fi
+    CHATAFL_API_KEY_FILE="$CHATAFL_EPHEMERAL_API_KEY_FILE"
+}
+
 prepare_chatafl_runtime_inputs() {
+    CHATAFL_API_MODE=direct
+    if [[ "$CHATAFL_USE_API_GATEWAY" == "1" ]]; then
+        if [[ -n "${CHATAFL_MODEL:-}" \
+            || -n "${CHATAFL_URL:-}" \
+            || -n "${CHATAFL_API_KEY:-}" \
+            || -n "${CHATAFL_API_KEY_FILE:-}" ]]; then
+            echo "Direct ChatAFL API settings cannot be combined with gateway mode." >&2
+            echo "Unset CHATAFL_MODEL, CHATAFL_URL, CHATAFL_API_KEY, and CHATAFL_API_KEY_FILE, or set CHATAFL_USE_API_GATEWAY=0." >&2
+            exit 1
+        fi
+        CHATAFL_MODEL_EFFECTIVE="${CHATAFL_GATEWAY_MODEL:-$VOLTRON_GATEWAY_MODEL}"
+        CHATAFL_URL_EFFECTIVE="${CHATAFL_GATEWAY_URL:-${VOLTRON_GATEWAY_BASE_URL%/}/chat/completions}"
+        if [[ -n "${CHATAFL_DOCKER_NETWORK:-}" \
+            && "$CHATAFL_DOCKER_NETWORK" != "$VOLTRON_DOCKER_NETWORK" ]]; then
+            echo "CHATAFL_DOCKER_NETWORK must match VOLTRON_DOCKER_NETWORK in shared gateway mode." >&2
+            exit 1
+        fi
+        CHATAFL_DOCKER_NETWORK="$VOLTRON_DOCKER_NETWORK"
+        write_chatafl_ephemeral_secret \
+            "$VOLTRON_GATEWAY_TOKEN" \
+            gateway-token
+        CHATAFL_API_KEY_SOURCE=gateway_internal_token
+        CHATAFL_API_MODE=gateway
+        export CHATAFL_DOCKER_NETWORK
+        return
+    fi
+
     if [[ "${CHATAFL_MODEL:-}" == *$'\n'* \
         || "${CHATAFL_MODEL:-}" == *$'\r'* ]]; then
         echo "CHATAFL_MODEL must not contain a newline." >&2
@@ -186,16 +300,7 @@ prepare_chatafl_runtime_inputs() {
             echo "CHATAFL_API_KEY must not contain a newline." >&2
             exit 1
         fi
-        CHATAFL_SECRET_ROOT="$PROJECT_ROOT/.runtime/chatafl/secrets"
-        mkdir -p "$CHATAFL_SECRET_ROOT"
-        chmod 0700 "$CHATAFL_SECRET_ROOT"
-        CHATAFL_EPHEMERAL_API_KEY_FILE=$(
-            mktemp "$CHATAFL_SECRET_ROOT/api-key.XXXXXX"
-        )
-        chmod 0600 "$CHATAFL_EPHEMERAL_API_KEY_FILE"
-        printf '%s' "$CHATAFL_API_KEY" \
-            > "$CHATAFL_EPHEMERAL_API_KEY_FILE"
-        CHATAFL_API_KEY_FILE="$CHATAFL_EPHEMERAL_API_KEY_FILE"
+        write_chatafl_ephemeral_secret "$CHATAFL_API_KEY" api-key
         CHATAFL_API_KEY_SOURCE=runtime_ephemeral_secret
         unset CHATAFL_API_KEY
     fi
@@ -203,27 +308,14 @@ prepare_chatafl_runtime_inputs() {
 
 if [[ "$uses_chatafl" == "1" ]]; then
     prepare_chatafl_runtime_inputs
+    export CHATAFL_API_MODE
 fi
 
-uses_voltron=0
-for fuzzer in ${FUZZER_LIST//,/ }; do
-    if [[ "$fuzzer" == "voltron" || "$fuzzer" == "all" ]]; then
-        uses_voltron=1
-        break
-    fi
-done
-
-if [[ "$uses_voltron" == "1" ]] \
-    && [[ "${VOLTRON_USE_API_GATEWAY:-1}" == "1" ]]; then
+if [[ "$uses_api_gateway" == "1" ]]; then
     # Keep the StateAFL serialization lock owned by this top-level shell only.
     # Long-lived children must not inherit fd 9, otherwise an orphaned monitor
     # or gateway can block every later StateAFL run.
     "$PROJECT_ROOT/run_api_gateway.sh" start 9>&-
-    export VOLTRON_USE_API_GATEWAY=1
-    export VOLTRON_DOCKER_NETWORK="${VOLTRON_DOCKER_NETWORK:-voltronbench}"
-    export VOLTRON_GATEWAY_BASE_URL="${VOLTRON_GATEWAY_BASE_URL:-http://voltron-api-gateway:8000/v1}"
-    export VOLTRON_GATEWAY_TOKEN="${VOLTRON_GATEWAY_TOKEN:-voltronbench-internal}"
-    export VOLTRON_GATEWAY_MODEL="${VOLTRON_GATEWAY_MODEL:-voltron-default}"
 fi
 
 RESULT_TIMESTAMP=$(date "+%Y-%m-%d_%H-%M-%S")
@@ -290,14 +382,24 @@ if [[ "$uses_chatafl" == "1" ]]; then
         )
     fi
 
-    CHATAFL_MODEL_EFFECTIVE="${CHATAFL_MODEL:-$CHATAFL_COMPILED_DEFAULT_MODEL}"
-    CHATAFL_URL_EFFECTIVE="${CHATAFL_URL:-$CHATAFL_COMPILED_DEFAULT_URL}"
+    CHATAFL_MODEL_EFFECTIVE="${CHATAFL_MODEL_EFFECTIVE:-${CHATAFL_MODEL:-$CHATAFL_COMPILED_DEFAULT_MODEL}}"
+    CHATAFL_URL_EFFECTIVE="${CHATAFL_URL_EFFECTIVE:-${CHATAFL_URL:-$CHATAFL_COMPILED_DEFAULT_URL}}"
     if [[ -z "$CHATAFL_MODEL_EFFECTIVE" ]]; then
         echo "Set CHATAFL_MODEL when using a custom ChatAFL runtime binary." >&2
         exit 1
     fi
     if [[ -z "$CHATAFL_URL_EFFECTIVE" ]]; then
         echo "Set CHATAFL_URL when using a custom ChatAFL runtime binary." >&2
+        exit 1
+    fi
+    if [[ "$CHATAFL_MODEL_EFFECTIVE" == *$'\n'* \
+        || "$CHATAFL_MODEL_EFFECTIVE" == *$'\r'* ]]; then
+        echo "The effective ChatAFL model must not contain a newline." >&2
+        exit 1
+    fi
+    if [[ "$CHATAFL_URL_EFFECTIVE" == *$'\n'* \
+        || "$CHATAFL_URL_EFFECTIVE" == *$'\r'* ]]; then
+        echo "The effective ChatAFL URL must not contain a newline." >&2
         exit 1
     fi
     CHATAFL_RUNTIME_BINARY_SHA256=$(
@@ -322,6 +424,7 @@ fi
     printf 'test_timeout_ms=%s\n' "$TEST_TIMEOUT"
     printf 'raw_results_root=%s\n' "$RUN_ROOT"
     if [[ "$uses_chatafl" == "1" ]]; then
+        printf 'chatafl_api_mode=%s\n' "$CHATAFL_API_MODE"
         printf 'chatafl_model=%s\n' "$CHATAFL_MODEL_EFFECTIVE"
         printf 'chatafl_url=%s\n' "$CHATAFL_URL_EFFECTIVE"
         printf 'chatafl_api_key_source=%s\n' "$CHATAFL_API_KEY_SOURCE"
@@ -333,6 +436,12 @@ fi
             "$CHATAFL_RUNTIME_BUILDER_IMAGE"
         printf 'chatafl_runtime_builder_image_id=%s\n' \
             "$CHATAFL_RUNTIME_BUILDER_IMAGE_ID"
+    fi
+    if [[ "$uses_api_gateway" == "1" ]]; then
+        printf 'llm_gateway_config_sha256=%s\n' \
+            "$LLM_GATEWAY_CONFIG_SHA256"
+        printf 'llm_gateway_profile_models=%s\n' \
+            "$LLM_GATEWAY_PROFILE_MODELS"
     fi
 } > "$PARAMETERS_FILE"
 

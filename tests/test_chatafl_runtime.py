@@ -9,6 +9,7 @@ import unittest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PREPARE_RUNTIME = PROJECT_ROOT / "scripts" / "prepare_chatafl_runtime.sh"
+LOAD_LLM_CONFIG = PROJECT_ROOT / "scripts" / "load_voltron_llm_config.py"
 EXEC_COMMON = (
     PROJECT_ROOT
     / "benchmark"
@@ -132,6 +133,45 @@ class ChatAflRuntimeConfigTests(unittest.TestCase):
 
 
 class ChatAflRuntimePreparationTests(unittest.TestCase):
+    def test_gateway_model_summary_deduplicates_without_printing_keys(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / "gateway.yaml"
+            config.write_text(
+                textwrap.dedent(
+                    """\
+                    profiles:
+                      - base_url: https://one.invalid/v1
+                        api_key: secret-one
+                        model: model-a
+                      - base_url: https://two.invalid/v1
+                        api_key: secret-two
+                        model: model-b
+                      - base_url: https://three.invalid/v1
+                        api_key: secret-three
+                        model: model-a
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                [
+                    "python3",
+                    str(LOAD_LLM_CONFIG),
+                    "--models-only",
+                    str(config),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(completed.stdout.strip(), "model-a,model-b")
+            self.assertNotIn("secret-", completed.stdout)
+
     def test_runtime_is_built_once_with_an_existing_image_and_cached(
         self,
     ) -> None:
@@ -288,7 +328,7 @@ class ChatAflRuntimeIntegrationTests(unittest.TestCase):
                 completed.stderr,
             )
 
-    def test_common_executor_mounts_runtime_and_preserves_model_as_one_argument(
+    def test_common_executor_connects_chatafl_to_the_shared_gateway(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -355,9 +395,16 @@ class ChatAflRuntimeIntegrationTests(unittest.TestCase):
             env["PROFUZZBENCH_MONITOR"] = "0"
             env["FAKE_DOCKER_LOG"] = str(docker_log)
             env["CHATAFL_RUNTIME_BINARY"] = str(runtime_binary)
-            env["CHATAFL_MODEL"] = "model with space"
-            env["CHATAFL_URL"] = "https://runtime.invalid/chat"
+            env["CHATAFL_USE_API_GATEWAY"] = "1"
+            env["CHATAFL_API_MODE"] = "gateway"
+            env["CHATAFL_DOCKER_NETWORK"] = "shared-llm-network"
+            env["CHATAFL_MODEL_EFFECTIVE"] = "voltron-default"
+            env["CHATAFL_URL_EFFECTIVE"] = (
+                "http://voltron-api-gateway:8000/v1/chat/completions"
+            )
             env["CHATAFL_API_KEY_FILE"] = str(api_key_file)
+            env["LLM_GATEWAY_CONFIG_SHA256"] = "a" * 64
+            env["LLM_GATEWAY_PROFILE_MODELS"] = "model-a,model-b"
 
             completed = subprocess.run(
                 [
@@ -382,12 +429,24 @@ class ChatAflRuntimeIntegrationTests(unittest.TestCase):
             metadata = (
                 results / "chatafl_runtime_metadata.txt"
             ).read_text(encoding="utf-8")
-            self.assertIn("effective_model=model with space", metadata)
+            self.assertIn("api_mode=gateway", metadata)
+            self.assertIn("effective_model=voltron-default", metadata)
             self.assertIn(
-                "effective_url=https://runtime.invalid/chat",
+                (
+                    "effective_url=http://voltron-api-gateway:8000/"
+                    "v1/chat/completions"
+                ),
                 metadata,
             )
-            self.assertIn("api_key_source=runtime_secret_file", metadata)
+            self.assertIn(
+                "api_key_source=gateway_internal_token",
+                metadata,
+            )
+            self.assertIn(f"gateway_config_sha256={'a' * 64}", metadata)
+            self.assertIn(
+                "gateway_profile_models=model-a,model-b",
+                metadata,
+            )
             self.assertIn("runtime_binary_sha256=", metadata)
             self.assertNotIn("never-write-this-secret", metadata)
             commands = [
@@ -402,11 +461,19 @@ class ChatAflRuntimeIntegrationTests(unittest.TestCase):
             env_index = run_command.index("--env")
             self.assertEqual(
                 run_command[env_index + 1],
-                "CHATAFL_MODEL=model with space",
+                "CHATAFL_MODEL=voltron-default",
             )
             self.assertIn(
-                "CHATAFL_URL=https://runtime.invalid/chat",
+                (
+                    "CHATAFL_URL=http://voltron-api-gateway:8000/"
+                    "v1/chat/completions"
+                ),
                 run_command,
+            )
+            network_index = run_command.index("--network")
+            self.assertEqual(
+                run_command[network_index + 1],
+                "shared-llm-network",
             )
             self.assertIn(
                 "CHATAFL_API_KEY_FILE=/run/secrets/chatafl_api_key",
@@ -453,6 +520,10 @@ class ChatAflRuntimeIntegrationTests(unittest.TestCase):
             executor,
         )
         self.assertIn(
+            'docker_args+=(--network "$CHATAFL_DOCKER_NETWORK")',
+            executor,
+        )
+        self.assertIn(
             "dst=/run/secrets/chatafl_api_key,readonly",
             executor,
         )
@@ -465,12 +536,20 @@ class ChatAflRuntimeIntegrationTests(unittest.TestCase):
         runner = (PROJECT_ROOT / "run.sh").read_text(encoding="utf-8")
 
         self.assertIn("scripts/prepare_chatafl_runtime.sh", runner)
+        self.assertIn(
+            "CHATAFL_USE_API_GATEWAY=${CHATAFL_USE_API_GATEWAY:-1}",
+            runner,
+        )
+        self.assertIn("chatafl_api_mode=%s", runner)
         self.assertIn("chatafl_model=%s", runner)
         self.assertIn("chatafl_url=%s", runner)
         self.assertIn("chatafl_api_key_source=%s", runner)
         self.assertIn("chatafl_runtime_binary_sha256=%s", runner)
         self.assertIn("chatafl_runtime_source_sha256=%s", runner)
         self.assertIn("chatafl_runtime_builder_image_id=%s", runner)
+        self.assertIn("llm_gateway_config_sha256=%s", runner)
+        self.assertIn("llm_gateway_profile_models=%s", runner)
+        self.assertIn("gateway_internal_token", runner)
 
         self.assertNotIn("chatafl_api_key=%s", runner)
         self.assertIn(
