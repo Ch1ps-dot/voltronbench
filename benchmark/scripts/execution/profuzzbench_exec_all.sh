@@ -4,6 +4,26 @@ export NUM_CONTAINERS="${NUM_CONTAINERS:-10}"
 export TIMEOUT="${TIMEOUT:-86400}"
 export SKIPCOUNT="${SKIPCOUNT:-1}"
 export TEST_TIMEOUT="${TEST_TIMEOUT:-20000}"
+export FORKED_DAAPD_STARTUP_WAIT_US="${FORKED_DAAPD_STARTUP_WAIT_US:-1000000}"
+export FORKED_DAAPD_MIN_TEST_TIMEOUT_MS="${FORKED_DAAPD_MIN_TEST_TIMEOUT_MS:-3000}"
+
+for timeout_setting in \
+    TEST_TIMEOUT \
+    FORKED_DAAPD_STARTUP_WAIT_US \
+    FORKED_DAAPD_MIN_TEST_TIMEOUT_MS; do
+    timeout_value=${!timeout_setting}
+    if [[ ! "$timeout_value" =~ ^[1-9][0-9]*$ ]]; then
+        printf '%s must be a positive integer.\n' "$timeout_setting" >&2
+        exit 2
+    fi
+done
+
+FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE=$TEST_TIMEOUT
+if (( FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE \
+    < FORKED_DAAPD_MIN_TEST_TIMEOUT_MS )); then
+    FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE=$FORKED_DAAPD_MIN_TEST_TIMEOUT_MS
+fi
+export FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE
 
 TARGET_LIST="${1:-}"
 FUZZER_LIST="${2:-}"
@@ -42,7 +62,7 @@ target_options() {
             echo "-P SMTP -D 10000 -q 3 -s 3 -E -K -W 100 -m none -t ${TEST_TIMEOUT}+"
             ;;
         forked-daapd)
-            echo "-P HTTP -D 200000 -m none -q 3 -s 3 -E -K -t ${TEST_TIMEOUT}+"
+            echo "-P HTTP -D ${FORKED_DAAPD_STARTUP_WAIT_US} -m none -q 3 -s 3 -E -K -t ${FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE}+"
             ;;
         pure-ftpd|proftpd|bftpd)
             echo "-m none -P FTP -D 10000 -q 3 -s 3 -E -K -t ${TEST_TIMEOUT}+"
@@ -167,6 +187,8 @@ echo "# NUM_CONTAINERS: ${NUM_CONTAINERS}"
 echo "# TIMEOUT: ${TIMEOUT} s"
 echo "# SKIPCOUNT: ${SKIPCOUNT}"
 echo "# TEST TIMEOUT: ${TEST_TIMEOUT} ms"
+echo "# FORKED-DAAPD STARTUP WAIT: ${FORKED_DAAPD_STARTUP_WAIT_US} us"
+echo "# FORKED-DAAPD TEST TIMEOUT: ${FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE} ms"
 echo "# TARGET LIST: ${targets}"
 echo "# FUZZER LIST: ${fuzzers}"
 echo "# RESULTS ROOT: ${RESULTS_ROOT}"

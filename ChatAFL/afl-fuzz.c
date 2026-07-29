@@ -598,6 +598,10 @@ range_list parse_buffer(char *buf, size_t buf_len)
 /* Initialize the implemented state machine as a graphviz graph */
 void setup_ipsm()
 {
+  khiter_t k;
+  int discard;
+  state_info_t *initial_state;
+
   ipsm = agopen("g", Agdirected, 0);
 
   agattr(ipsm, AGNODE, "color", "black"); // Default node colr is black
@@ -606,6 +610,30 @@ void setup_ipsm()
   khs_ipsm_paths = kh_init(hs32);
 
   khms_states = kh_init(hms);
+
+  /*
+   * State 0 is the synthetic initial state. Most AFLNet response parsers
+   * prepend it to the observed state sequence, but registering it here keeps
+   * the IPSM invariant true even for short or non-repeatable traces.
+   */
+  agnode(ipsm, "0", TRUE);
+
+  initial_state = (state_info_t *)ck_alloc(sizeof(state_info_t));
+  initial_state->id = 0;
+  initial_state->is_covered = 1;
+  initial_state->paths = 0;
+  initial_state->paths_discovered = 0;
+  initial_state->selected_times = 0;
+  initial_state->fuzzs = 0;
+  initial_state->score = 1;
+  initial_state->selected_seed_index = 0;
+  initial_state->seeds = NULL;
+  initial_state->seeds_count = 0;
+
+  k = kh_put(hms, khms_states, 0, &discard);
+  kh_value(khms_states, k) = initial_state;
+  state_ids = (u32 *)ck_realloc(state_ids, (state_ids_count + 1) * sizeof(u32));
+  state_ids[state_ids_count++] = 0;
 }
 
 /* Free memory allocated to state-machine variables */

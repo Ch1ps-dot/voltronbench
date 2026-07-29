@@ -233,11 +233,15 @@ class StateAflImageConfigurationTests(unittest.TestCase):
                 contents,
             )
             expected_patches = ["stateafl-response-metrics.patch"]
-            if "HTTP/Lighttpd1" in dockerfile.as_posix():
+            allows_initial_state_patch = (
+                "HTTP/Lighttpd1" in dockerfile.as_posix()
+                or "SMTP/Exim" in dockerfile.as_posix()
+            )
+            if allows_initial_state_patch:
                 expected_patches.insert(0, "stateafl-initial-state.patch")
             self.assertEqual(stateafl_patches, expected_patches, dockerfile)
             self.assertNotIn("stateafl-benchmark.patch", contents, dockerfile)
-            if "HTTP/Lighttpd1" not in dockerfile.as_posix():
+            if not allows_initial_state_patch:
                 self.assertNotIn(
                     "stateafl-initial-state.patch",
                     contents,
@@ -256,7 +260,7 @@ class StateAflImageConfigurationTests(unittest.TestCase):
             self.assertFalse(
                 (dockerfile.parent / "stateafl-benchmark.patch").exists()
             )
-            if "HTTP/Lighttpd1" not in dockerfile.as_posix():
+            if not allows_initial_state_patch:
                 self.assertFalse(
                     (dockerfile.parent / "stateafl-initial-state.patch").exists()
                 )
@@ -311,6 +315,15 @@ class StateAflImageConfigurationTests(unittest.TestCase):
         ):
             self.assertIn(target_patch, exim_base)
             self.assertIn(target_patch, exim_state)
+
+    def test_aflnet_style_fuzzers_register_initial_state(self) -> None:
+        for relative in ("aflnet/afl-fuzz.c", "ChatAFL/afl-fuzz.c"):
+            with self.subTest(source=relative):
+                source = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn("State 0 is the synthetic initial state", source)
+                self.assertIn('agnode(ipsm, "0", TRUE)', source)
+                self.assertIn("kh_put(hms, khms_states, 0", source)
+                self.assertIn("state_ids[state_ids_count++] = 0", source)
 
 
 class StateAflSeedCorpusTests(unittest.TestCase):

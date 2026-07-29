@@ -681,6 +681,11 @@ Remove copied fuzzer source trees from subject directories:
 - `SKIPCOUNT` controls how often progress samples are recorded.
 - `TEST_TIMEOUT` is forwarded into AFLNet/ChatAFL/StateAFL target options where
   those options use `-t ${TEST_TIMEOUT}+`.
+- Forked-DAAPd uses a one-second server startup wait by default. Override it
+  with `FORKED_DAAPD_STARTUP_WAIT_US`; its effective testcase timeout is
+  `max(TEST_TIMEOUT, FORKED_DAAPD_MIN_TEST_TIMEOUT_MS)`, with a default minimum
+  of 3000 ms. These settings apply through the shared target options used by
+  AFLNet, ChatAFL, and StateAFL.
 - Voltron maps `pure-ftpd` to `pureftpd` and `lighttpd1` to `lighttpd` before
   invoking its CLI.
 

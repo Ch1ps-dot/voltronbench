@@ -8,6 +8,8 @@ DURATION_MINUTES=${2:-1440}
 TIMEOUT=$(( DURATION_MINUTES * 60))
 SKIPCOUNT="${SKIPCOUNT:-1}"
 TEST_TIMEOUT="${TEST_TIMEOUT:-20000}"
+FORKED_DAAPD_STARTUP_WAIT_US="${FORKED_DAAPD_STARTUP_WAIT_US:-1000000}"
+FORKED_DAAPD_MIN_TEST_TIMEOUT_MS="${FORKED_DAAPD_MIN_TEST_TIMEOUT_MS:-3000}"
 
 export TARGET_LIST=$3
 export FUZZER_LIST=$4
@@ -17,6 +19,26 @@ then
     echo "Usage: $0 NUM_CONTAINERS DURATION_MINUTES TARGET FUZZER"
     exit 1
 fi
+
+for timeout_setting in \
+    TEST_TIMEOUT \
+    FORKED_DAAPD_STARTUP_WAIT_US \
+    FORKED_DAAPD_MIN_TEST_TIMEOUT_MS; do
+    timeout_value=${!timeout_setting}
+    if [[ ! "$timeout_value" =~ ^[1-9][0-9]*$ ]]; then
+        printf '%s must be a positive integer.\n' "$timeout_setting" >&2
+        exit 1
+    fi
+done
+
+FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE=$TEST_TIMEOUT
+if (( FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE \
+    < FORKED_DAAPD_MIN_TEST_TIMEOUT_MS )); then
+    FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE=$FORKED_DAAPD_MIN_TEST_TIMEOUT_MS
+fi
+export FORKED_DAAPD_STARTUP_WAIT_US
+export FORKED_DAAPD_MIN_TEST_TIMEOUT_MS
+export FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE
 
 CORE_PATTERN_PATH=/proc/sys/kernel/core_pattern
 CORE_PATTERN_ORIGINAL=
@@ -422,6 +444,12 @@ fi
     printf 'fuzzers=%s\n' "$FUZZER_LIST"
     printf 'skipcount=%s\n' "$SKIPCOUNT"
     printf 'test_timeout_ms=%s\n' "$TEST_TIMEOUT"
+    printf 'forked_daapd_startup_wait_us=%s\n' \
+        "$FORKED_DAAPD_STARTUP_WAIT_US"
+    printf 'forked_daapd_min_test_timeout_ms=%s\n' \
+        "$FORKED_DAAPD_MIN_TEST_TIMEOUT_MS"
+    printf 'forked_daapd_test_timeout_ms_effective=%s\n' \
+        "$FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE"
     printf 'raw_results_root=%s\n' "$RUN_ROOT"
     if [[ "$uses_chatafl" == "1" ]]; then
         printf 'chatafl_api_mode=%s\n' "$CHATAFL_API_MODE"
