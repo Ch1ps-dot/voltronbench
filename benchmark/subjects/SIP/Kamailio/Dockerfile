@@ -42,6 +42,7 @@ WORKDIR /home/ubuntu
 
 # Import environment variable to pass as parameter to make (e.g., to make parallel builds with -j)
 ARG MAKE_OPT
+ARG GITHUB_MIRROR
 
 # Set up fuzzers
 COPY --chown=ubuntu:ubuntu aflnet aflnet
@@ -86,7 +87,7 @@ ENV ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_a
 # Download and compile Kamalio for fuzzing
 RUN cd $WORKDIR && \
     KAMAILIO_MODULES="kex corex tm tmx sl rr pv maxfwd usrloc registrar textops siputils xlog sanity counters" && \
-    git clone https://github.com/kamailio/kamailio.git && \
+    git clone "${GITHUB_MIRROR}https://github.com/kamailio/kamailio.git" && \
     cd kamailio && \
     git checkout a2209018fb03d && \
     patch -p1 < $WORKDIR/kamailio.patch && \
@@ -102,7 +103,7 @@ RUN cd $WORKDIR && \
 
 # Build SIP client to simulate the callee
 RUN cd $WORKDIR && \
-    git clone https://github.com/pjsip/pjproject.git && \
+    git clone "${GITHUB_MIRROR}https://github.com/pjsip/pjproject.git" && \
     cd pjproject && \
     git checkout 87cd4a && \
     patch -p1 < $WORKDIR/pjsip.patch && \
@@ -112,7 +113,7 @@ RUN cd $WORKDIR && \
 # Download and compile Kamalio for code coverage analysis
 RUN cd $WORKDIR && \
     KAMAILIO_MODULES="kex corex tm tmx sl rr pv maxfwd usrloc registrar textops siputils xlog sanity counters" && \
-    git clone https://github.com/kamailio/kamailio.git kamailio-gcov && \
+    git clone "${GITHUB_MIRROR}https://github.com/kamailio/kamailio.git" kamailio-gcov && \
     cd kamailio-gcov && \
     git checkout a2209018fb03d && \
     patch -p1 < $WORKDIR/kamailio.patch && \

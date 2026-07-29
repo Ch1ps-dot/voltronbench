@@ -42,6 +42,7 @@ WORKDIR /home/ubuntu
 
 # Import environment variable to pass as parameter to make (e.g., to make parallel builds with -j)
 ARG MAKE_OPT
+ARG GITHUB_MIRROR
 
 # Set up fuzzers
 COPY --chown=ubuntu:ubuntu aflnet aflnet
@@ -79,7 +80,7 @@ ENV ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_a
 
 # Download and compile LightFTP for fuzzing
 RUN cd $WORKDIR && \
-    git clone https://github.com/hfiref0x/LightFTP.git && \
+    git clone "${GITHUB_MIRROR}https://github.com/hfiref0x/LightFTP.git" && \
     cd LightFTP && \
     git checkout 139af7c && \
     patch -p1 < ${WORKDIR}/fuzzing.patch && \
@@ -95,7 +96,7 @@ RUN cd ${WORKDIR}/LightFTP/Source/Release && \
 
 # Download and compile LightFTP for coverage analysis
 RUN cd $WORKDIR && \
-    git clone https://github.com/hfiref0x/LightFTP.git LightFTP-gcov && \
+    git clone "${GITHUB_MIRROR}https://github.com/hfiref0x/LightFTP.git" LightFTP-gcov && \
     cd LightFTP-gcov && \
     git checkout 139af7c && \
     patch -p1 < ${WORKDIR}/gcov.patch && \

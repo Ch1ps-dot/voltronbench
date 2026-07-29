@@ -41,6 +41,7 @@ WORKDIR /home/ubuntu
 
 # Import environment variable to pass as parameter to make (e.g., to make parallel builds with -j)
 ARG MAKE_OPT
+ARG GITHUB_MIRROR
 
 # Set up fuzzers
 COPY --chown=ubuntu:ubuntu aflnet aflnet
@@ -92,7 +93,7 @@ ENV ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_a
 
 # Download and compile forked-daapd for fuzzing
 RUN cd $WORKDIR && \
-    git clone https://github.com/ejurgensen/forked-daapd.git && \
+    git clone "${GITHUB_MIRROR}https://github.com/ejurgensen/forked-daapd.git" && \
     cd forked-daapd && \
     git checkout 2ca10d9 && \
     patch -p1 < $WORKDIR/forked-daapd.patch && \
@@ -103,7 +104,7 @@ RUN cd $WORKDIR && \
 
 # Download and compile forked-daapd for code coverage analysis
 RUN cd $WORKDIR && \
-    git clone https://github.com/ejurgensen/forked-daapd.git forked-daapd-gcov && \
+    git clone "${GITHUB_MIRROR}https://github.com/ejurgensen/forked-daapd.git" forked-daapd-gcov && \
     cd forked-daapd-gcov && \
     git checkout 2ca10d9 && \
     patch -p1 < $WORKDIR/forked-daapd.patch && \

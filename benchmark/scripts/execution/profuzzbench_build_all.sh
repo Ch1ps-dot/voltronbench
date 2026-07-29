@@ -21,7 +21,10 @@ build_if_missing() {
   fi
 
   echo "building $tag"
-  (cd "$PFBENCH" && cd "$ctx" && docker build . -f "$dockerfile" -t "$tag" --build-arg "MAKE_OPT=${MAKE_OPT:-}" ${NO_CACHE:-})
+  (cd "$PFBENCH" && cd "$ctx" && docker build . -f "$dockerfile" -t "$tag" \
+    --build-arg "MAKE_OPT=${MAKE_OPT:-}" \
+    --build-arg "GITHUB_MIRROR=${GITHUB_MIRROR:-}" \
+    ${NO_CACHE:-})
 }
 
 build_if_missing "subjects/FTP/LightFTP" lightftp-vol

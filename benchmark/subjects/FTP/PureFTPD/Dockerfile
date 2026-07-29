@@ -42,6 +42,7 @@ WORKDIR /home/ubuntu
 
 # Import environment variable to pass as parameter to make (e.g., to make parallel builds with -j)
 ARG MAKE_OPT
+ARG GITHUB_MIRROR
 
 # Set up fuzzers
 COPY --chown=ubuntu:ubuntu aflnet aflnet
@@ -83,7 +84,7 @@ ENV ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_a
 
 # Set up PureFTPD for fuzzing
 RUN cd ${WORKDIR} && \
-    git clone https://github.com/jedisct1/pure-ftpd.git && \
+    git clone "${GITHUB_MIRROR}https://github.com/jedisct1/pure-ftpd.git" && \
     cd pure-ftpd && \
     git checkout 10122d9f && \
     patch -p1 < ${WORKDIR}/fuzzing.patch && \
@@ -93,7 +94,7 @@ RUN cd ${WORKDIR} && \
 
 # Set up PureFTPD for coverage analysis
 RUN cd ${WORKDIR} && \
-    git clone https://github.com/jedisct1/pure-ftpd.git pure-ftpd-gcov && \
+    git clone "${GITHUB_MIRROR}https://github.com/jedisct1/pure-ftpd.git" pure-ftpd-gcov && \
     cd pure-ftpd-gcov && \
     git checkout 10122d9f && \
     patch -p1 < ${WORKDIR}/gcov.patch && \

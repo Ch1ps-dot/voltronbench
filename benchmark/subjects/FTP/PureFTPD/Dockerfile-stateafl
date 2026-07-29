@@ -6,13 +6,14 @@ WORKDIR /home/ubuntu
 
 # Import environment variable to pass as parameter to make (e.g., to make parallel builds with -j)
 ARG MAKE_OPT
+ARG GITHUB_MIRROR
 
 ENV STATEAFL="/home/ubuntu/stateafl"
 ENV STATEAFL_CFLAGS="-DENABLE_TRACE_GLOBAL_DATA -DBLACKLIST_GLOBALS"
 
 COPY --chown=ubuntu:ubuntu stateafl-response-metrics.patch ${WORKDIR}/stateafl-response-metrics.patch
 
-RUN git clone https://github.com/stateafl/stateafl.git $STATEAFL && \
+RUN git clone "${GITHUB_MIRROR}https://github.com/stateafl/stateafl.git" $STATEAFL && \
     cd $STATEAFL && \
     git checkout d923e22f7b2688db45b08f3fa3a29a566e7ff3a4 && \
     patch -p1 < ${WORKDIR}/stateafl-response-metrics.patch && \
@@ -26,7 +27,7 @@ ENV PATH=${STATEAFL}:${PATH}
 
 # Dedicated instrumented version for StateAFL
 RUN cd ${WORKDIR} && \
-    git clone https://github.com/jedisct1/pure-ftpd.git pure-ftpd-stateafl && \
+    git clone "${GITHUB_MIRROR}https://github.com/jedisct1/pure-ftpd.git" pure-ftpd-stateafl && \
     cd pure-ftpd-stateafl && \
     git checkout 10122d9f && \
     patch -p1 < ${WORKDIR}/fuzzing.patch && \

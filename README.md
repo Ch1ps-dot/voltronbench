@@ -27,6 +27,28 @@ find benchmark/experiment-runs -name 'out-lightftp-stateafl_1.tar.gz'
 ls res_experiment_*.tar.gz
 ```
 
+`setup.sh` uses `https://github.com` directly by default. To route GitHub
+source clones through a trusted prefix-style mirror during Docker builds:
+
+```bash
+./setup.sh --github-mirror https://mirror.example/
+```
+
+For example, the mirror above receives
+`https://mirror.example/https://github.com/owner/repository.git`. The same
+selection can be supplied as `GITHUB_MIRROR=https://mirror.example/`.
+Mirror URLs must not contain credentials because Docker build arguments are
+not secret storage. This option affects GitHub source clones only; it does not
+configure Docker Hub or APT mirrors.
+
+Existing images are skipped. To rebuild them with a different GitHub source
+mode:
+
+```bash
+FORCE_REBUILD=1 ./setup.sh --github-mirror https://mirror.example/
+FORCE_REBUILD=1 ./setup.sh --github-direct
+```
+
 Run AFLNet with the same entry point:
 
 ```bash
@@ -144,6 +166,15 @@ Build all benchmark Docker images:
 
 ```bash
 ./setup.sh
+```
+
+Select a trusted prefix-style GitHub source mirror, or explicitly select the
+official site:
+
+```bash
+./setup.sh --github-mirror https://mirror.example/
+./setup.sh --github-direct
+./setup.sh --help
 ```
 
 ChatAFL model, URL, and API key are selected at experiment runtime. They are

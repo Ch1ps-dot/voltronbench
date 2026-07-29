@@ -216,8 +216,12 @@ class StateAflImageConfigurationTests(unittest.TestCase):
             contents = dockerfile.read_text(encoding="utf-8")
             self.assertIn(STATEAFL_COMMIT, contents, dockerfile)
             self.assertIn("stateafl-response-metrics.patch", contents, dockerfile)
+            self.assertIn("ARG GITHUB_MIRROR", contents, dockerfile)
             self.assertIn(
-                "git clone https://github.com/stateafl/stateafl.git $STATEAFL",
+                (
+                    'git clone "${GITHUB_MIRROR}https://github.com/'
+                    'stateafl/stateafl.git" $STATEAFL'
+                ),
                 contents,
                 dockerfile,
             )

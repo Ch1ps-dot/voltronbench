@@ -6,6 +6,7 @@ WORKDIR /home/ubuntu
 
 # Import environment variable to pass as parameter to make (e.g., to make parallel builds with -j)
 ARG MAKE_OPT
+ARG GITHUB_MIRROR
 
 # Set up StateAFL
 ENV STATEAFL="/home/ubuntu/stateafl"
@@ -16,7 +17,7 @@ ENV TRACE_CUSTOM_SEND="evhttp_send_reply"
 
 COPY --chown=ubuntu:ubuntu stateafl-response-metrics.patch ${WORKDIR}/stateafl-response-metrics.patch
 
-RUN git clone https://github.com/stateafl/stateafl.git $STATEAFL && \
+RUN git clone "${GITHUB_MIRROR}https://github.com/stateafl/stateafl.git" $STATEAFL && \
     cd $STATEAFL && \
     git checkout d923e22f7b2688db45b08f3fa3a29a566e7ff3a4 && \
     patch -p1 < ${WORKDIR}/stateafl-response-metrics.patch && \
@@ -32,7 +33,7 @@ COPY --chown=ubuntu:ubuntu forked-daapd.patch ${WORKDIR}/forked-daapd.patch
 
 # Dedicated instrumented version for StateAFL
 RUN cd $WORKDIR && \
-    git clone https://github.com/ejurgensen/forked-daapd.git forked-daapd-stateafl && \
+    git clone "${GITHUB_MIRROR}https://github.com/ejurgensen/forked-daapd.git" forked-daapd-stateafl && \
     cd forked-daapd-stateafl && \
     git checkout 2ca10d9 && \
     patch -p1 < $WORKDIR/forked-daapd.patch && \

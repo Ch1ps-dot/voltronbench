@@ -42,6 +42,7 @@ WORKDIR /home/ubuntu
 
 # Import environment variable to pass as parameter to make (e.g., to make parallel builds with -j)
 ARG MAKE_OPT
+ARG GITHUB_MIRROR
 
 # Set up fuzzers
 COPY --chown=ubuntu:ubuntu aflnet aflnet
@@ -92,7 +93,7 @@ ENV ASAN_OPTIONS='abort_on_error=1:symbolize=0:detect_leaks=0:detect_stack_use_a
 
 # Download, compile and install Exim for fuzzing
 RUN cd ${WORKDIR} && \
-    git clone https://github.com/Exim/exim && \
+    git clone "${GITHUB_MIRROR}https://github.com/Exim/exim" && \
     cd exim && \
     git checkout d6a5a05b84 && \
     patch -p1 < ${WORKDIR}/exim-response-code.patch && \
@@ -104,7 +105,7 @@ RUN cd ${WORKDIR} && \
 
 # Download and compile Exim for coverage analysis
 RUN cd ${WORKDIR} && \
-    git clone https://github.com/Exim/exim exim-gcov && \
+    git clone "${GITHUB_MIRROR}https://github.com/Exim/exim" exim-gcov && \
     cd exim-gcov && \
     git checkout d6a5a05b84 && \
     patch -p1 < ${WORKDIR}/exim-rand.patch && \

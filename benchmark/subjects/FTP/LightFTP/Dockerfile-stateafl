@@ -2,13 +2,14 @@ FROM lightftp-vol
 
 # Import environment variable to pass as parameter to make (e.g., to make parallel builds with -j)
 ARG MAKE_OPT
+ARG GITHUB_MIRROR
 
 # Set up StateAFL
 ENV STATEAFL="/home/ubuntu/stateafl"
 
 COPY --chown=ubuntu:ubuntu stateafl-response-metrics.patch ${WORKDIR}/stateafl-response-metrics.patch
 
-RUN git clone https://github.com/stateafl/stateafl.git $STATEAFL && \
+RUN git clone "${GITHUB_MIRROR}https://github.com/stateafl/stateafl.git" $STATEAFL && \
     cd $STATEAFL && \
     git checkout d923e22f7b2688db45b08f3fa3a29a566e7ff3a4 && \
     patch -p1 < ${WORKDIR}/stateafl-response-metrics.patch && \
@@ -22,7 +23,7 @@ ENV PATH=${STATEAFL}:${PATH}
 
 # Dedicated instrumented version for StateAFL
 RUN cd $WORKDIR && \
-    git clone https://github.com/hfiref0x/LightFTP.git LightFTP-stateafl && \
+    git clone "${GITHUB_MIRROR}https://github.com/hfiref0x/LightFTP.git" LightFTP-stateafl && \
     cd LightFTP-stateafl && \
     git checkout 139af7c && \
     patch -p1 < ${WORKDIR}/fuzzing.patch && \

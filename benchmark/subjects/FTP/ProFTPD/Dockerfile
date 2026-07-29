@@ -42,6 +42,7 @@ WORKDIR /home/ubuntu
 
 # Import environment variable to pass as parameter to make (e.g., to make parallel builds with -j)
 ARG MAKE_OPT
+ARG GITHUB_MIRROR
 
 # Set up fuzzers
 COPY --chown=ubuntu:ubuntu aflnet aflnet
@@ -79,7 +80,7 @@ RUN mkdir $WORKDIR
 
 # Set up ProFTPD for fuzzing
 RUN cd ${WORKDIR} && \
-    git clone https://github.com/proftpd/proftpd.git && \
+    git clone "${GITHUB_MIRROR}https://github.com/proftpd/proftpd.git" && \
     cd proftpd && \
     git checkout 61e621e743346 && \
     CC="afl-clang-fast" CXX="afl-clang-fast++" ./configure --enable-devel=nodaemon:nofork && \
@@ -87,7 +88,7 @@ RUN cd ${WORKDIR} && \
 
 # Set up ProFTPD for coverage analysis
 RUN cd ${WORKDIR} && \
-    git clone https://github.com/proftpd/proftpd.git proftpd-gcov && \
+    git clone "${GITHUB_MIRROR}https://github.com/proftpd/proftpd.git" proftpd-gcov && \
     cd proftpd-gcov && \
     git checkout 61e621e743346 && \
     CFLAGS="-fprofile-arcs -ftest-coverage" CPPFLAGS="-fprofile-arcs -ftest-coverage" CXXFLAGS="-fprofile-arcs -ftest-coverage" LDFLAGS="-fprofile-arcs -ftest-coverage" ./configure --enable-devel=nodaemon:nofork && \
