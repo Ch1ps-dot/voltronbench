@@ -7,7 +7,7 @@ NUM_CONTAINERS=$1
 DURATION_MINUTES=${2:-1440}
 TIMEOUT=$(( DURATION_MINUTES * 60))
 SKIPCOUNT="${SKIPCOUNT:-1}"
-TEST_TIMEOUT="${TEST_TIMEOUT:-5000}"
+TEST_TIMEOUT="${TEST_TIMEOUT:-20000}"
 
 export TARGET_LIST=$3
 export FUZZER_LIST=$4
@@ -138,7 +138,10 @@ done
 
 if [[ "$uses_voltron" == "1" ]] \
     && [[ "${VOLTRON_USE_API_GATEWAY:-1}" == "1" ]]; then
-    "$PROJECT_ROOT/run_api_gateway.sh" start
+    # Keep the StateAFL serialization lock owned by this top-level shell only.
+    # Long-lived children must not inherit fd 9, otherwise an orphaned monitor
+    # or gateway can block every later StateAFL run.
+    "$PROJECT_ROOT/run_api_gateway.sh" start 9>&-
     export VOLTRON_USE_API_GATEWAY=1
     export VOLTRON_DOCKER_NETWORK="${VOLTRON_DOCKER_NETWORK:-voltronbench}"
     export VOLTRON_GATEWAY_BASE_URL="${VOLTRON_GATEWAY_BASE_URL:-http://voltron-api-gateway:8000/v1}"
@@ -185,7 +188,7 @@ NUM_CONTAINERS=$NUM_CONTAINERS \
 TIMEOUT=$TIMEOUT \
 SKIPCOUNT=$SKIPCOUNT \
 TEST_TIMEOUT=$TEST_TIMEOUT \
-scripts/execution/profuzzbench_exec_all.sh "$TARGET_LIST" "$FUZZER_LIST"
+scripts/execution/profuzzbench_exec_all.sh "$TARGET_LIST" "$FUZZER_LIST" 9>&-
 EXPERIMENT_STATUS=$?
 printf 'experiment_status=%s\n' "$EXPERIMENT_STATUS" >> "$PARAMETERS_FILE"
 
@@ -205,7 +208,7 @@ echo "Starting automatic analysis."
 
 ANALYSIS_STATUS=0
 "$PROJECT_ROOT/analyze.sh" \
-    "$TARGET_LIST" "$DURATION_MINUTES" "$BUNDLE_DIR" "$RUN_ROOT" \
+    "$TARGET_LIST" "$DURATION_MINUTES" "$BUNDLE_DIR" "$RUN_ROOT" 9>&- \
     || ANALYSIS_STATUS=$?
 printf 'analysis_status=%s\n' "$ANALYSIS_STATUS" \
     >> "$PARAMETERS_FILE"

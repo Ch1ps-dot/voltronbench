@@ -37,7 +37,9 @@ else
 fi
 
 #process initial seed corpus first
-for f in $(echo $folder/$testdir/*.raw); do 
+shopt -s nullglob
+seed_files=("$folder/$testdir/"*.raw)
+for f in "${seed_files[@]}"; do
   time=$(stat -c %Y $f)
 
   #terminate running server(s)
@@ -59,7 +61,10 @@ done
 
 #process fuzzer-generated testcases
 count=0
-for f in $(echo $folder/$testdir/id*); do 
+last_testcase=""
+testcases=("$folder/$testdir/"id*)
+for f in "${testcases[@]}"; do
+  last_testcase=$f
   time=$(stat -c %Y $f)
 
   #terminate running server(s)
@@ -83,9 +88,9 @@ for f in $(echo $folder/$testdir/id*); do
 done
 
 #ouput cov data for the last testcase(s) if step > 1
-if [[ $step -gt 1 ]]
+if [[ $step -gt 1 && -n "$last_testcase" ]]
 then
-  time=$(stat -c %Y $f)
+  time=$(stat -c %Y "$last_testcase")
   cov_data=$(gcovr -r .. -s | grep "[lb][a-z]*:")
   l_per=$(echo "$cov_data" | grep lines | cut -d" " -f2 | rev | cut -c2- | rev)
   l_abs=$(echo "$cov_data" | grep lines | cut -d" " -f3 | cut -c2-)

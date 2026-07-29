@@ -1,0 +1,161 @@
+diff --git a/afl-fuzz.c b/afl-fuzz.c
+index 5df4a16..85df293 100644
+--- a/afl-fuzz.c
++++ b/afl-fuzz.c
+@@ -455 +455,12 @@
++/* AFLNet-style response state machine used only for benchmark metrics. */
++static Agraph_t *response_ipsm;
++static FILE *response_metrics_file;
++static u32 response_prev_nodes;
++static u32 response_prev_edges;
++
++static void setup_response_ipsm_metrics(void);
++static void update_response_ipsm_metrics(unsigned char *buf,
++                                         unsigned int buf_size);
++static void destroy_response_ipsm_metrics(void);
++
+ /* Hash table/map and list */
+@@ -838 +849,8 @@
++  /*
++   * Observe the same response-code state space as AFLNet for benchmark
++   * comparison. This side graph is deliberately excluded from StateAFL's
++   * memory-state IPSM, scheduling, repeatability checks, and seed selection.
++   */
++  update_response_ipsm_metrics(response_buf, response_buf_size);
++
+   unsigned int *state_sequence = (*extract_response_codes)(response_buf, response_buf_size, &state_count);
+@@ -5308 +5326,124 @@
++static void write_response_ipsm_dot(void) {
++
++  u8 *dot_path = alloc_printf("%s/response_ipsm.dot", out_dir);
++  u8 *tmp_path = alloc_printf("%s/response_ipsm.dot.tmp", out_dir);
++  FILE *dot_file = fopen(tmp_path, "w");
++
++  if (!dot_file) PFATAL("Unable to create '%s'", tmp_path);
++  if (agwrite(response_ipsm, dot_file) != 0)
++    FATAL("Unable to write '%s'", tmp_path);
++  if (fclose(dot_file) != 0) PFATAL("Unable to close '%s'", tmp_path);
++  if (rename(tmp_path, dot_path) != 0)
++    PFATAL("Unable to replace '%s'", dot_path);
++
++  ck_free(tmp_path);
++  ck_free(dot_path);
++
++}
++
++static void write_response_metrics_snapshot(void) {
++
++  fprintf(response_metrics_file, "%llu,%llu,%u,%u\n",
++          get_cur_time() / 1000, total_execs,
++          response_prev_nodes, response_prev_edges);
++  fflush(response_metrics_file);
++
++}
++
++static void setup_response_ipsm_metrics(void) {
++
++  u8 *metrics_path = alloc_printf("%s/response_ipsm_metrics.csv", out_dir);
++  s32 fd;
++
++  response_ipsm = agopen("response_g", Agdirected, 0);
++  if (!response_ipsm) FATAL("Unable to create response state graph");
++
++  fd = open(metrics_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
++  if (fd < 0) PFATAL("Unable to create '%s'", metrics_path);
++
++  response_metrics_file = fdopen(fd, "w");
++  if (!response_metrics_file)
++    PFATAL("fdopen() failed for '%s'", metrics_path);
++
++  fprintf(response_metrics_file,
++          "# unix_time,total_execs,response_state_num,"
++          "response_transition_num\n");
++  response_prev_nodes = 0;
++  response_prev_edges = 0;
++  write_response_metrics_snapshot();
++  write_response_ipsm_dot();
++
++  ck_free(metrics_path);
++
++}
++
++static void update_response_ipsm_metrics(unsigned char *buf,
++                                         unsigned int buf_size) {
++
++  unsigned int response_state_count = 0;
++  unsigned int *response_state_sequence;
++  u32 current_nodes;
++  u32 current_edges;
++  unsigned int i;
++
++  if (!orig_extract_response_codes || !response_ipsm || !buf || !buf_size)
++    return;
++
++  response_state_sequence =
++      orig_extract_response_codes(buf, buf_size, &response_state_count);
++
++  /*
++   * Match AFLNet's IPSM construction: transitions are only created within one
++   * response sequence, never across separate test cases. Graphviz de-duplicates
++   * both nodes and directed edges, including self-loops.
++   */
++  if (response_state_sequence && response_state_count > 1) {
++    for (i = 1; i < response_state_count; i++) {
++      char from_state[STATE_STR_LEN];
++      char to_state[STATE_STR_LEN];
++      Agnode_t *from;
++      Agnode_t *to;
++
++      snprintf(from_state, STATE_STR_LEN, "%u",
++               response_state_sequence[i - 1]);
++      snprintf(to_state, STATE_STR_LEN, "%u", response_state_sequence[i]);
++
++      from = agnode(response_ipsm, from_state, TRUE);
++      to = agnode(response_ipsm, to_state, TRUE);
++      if (!from || !to) FATAL("Unable to update response state graph");
++
++      if (!agedge(response_ipsm, from, to, NULL, FALSE) &&
++          !agedge(response_ipsm, from, to, "new_edge", TRUE))
++        FATAL("Unable to add response state transition");
++    }
++  }
++
++  if (response_state_sequence) ck_free(response_state_sequence);
++
++  current_nodes = agnnodes(response_ipsm);
++  current_edges = agnedges(response_ipsm);
++  if (current_nodes == response_prev_nodes &&
++      current_edges == response_prev_edges)
++    return;
++
++  response_prev_nodes = current_nodes;
++  response_prev_edges = current_edges;
++  write_response_metrics_snapshot();
++  write_response_ipsm_dot();
++
++}
++
++static void destroy_response_ipsm_metrics(void) {
++
++  if (response_metrics_file) {
++    fclose(response_metrics_file);
++    response_metrics_file = NULL;
++  }
++  if (response_ipsm) {
++    agclose(response_ipsm);
++    response_ipsm = NULL;
++  }
++
++}
++
+ /* Update the plot file if there is a reason to. */
+@@ -9522,2 +9663,4 @@
+                      "unique_hangs, max_depth, execs_per_sec\n");
++  setup_response_ipsm_metrics();
++
+                      /* ignore errors */
+@@ -10702,3 +10845,4 @@
+   fclose(plot_file);
++  destroy_response_ipsm_metrics();
+   destroy_queue();
+   destroy_extras();

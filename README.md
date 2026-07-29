@@ -214,8 +214,11 @@ post-mortem inspection with `docker logs` or `docker cp`.
 
 StateAFL follows the ProFuzzBench integration model. Every active target has a
 `Dockerfile-stateafl` layered on its normal `*-vol` image. The derived image
-builds StateAFL, recompiles the same target revision with StateAFL's
-`afl-clang-fast`, and installs a target-specific `run-stateafl` setup script.
+builds StateAFL, recompiles the same target revision and target-side patches
+with StateAFL's `afl-clang-fast`, and installs a target-specific
+`run-stateafl` setup script. The only source patch applied to StateAFL itself
+is `stateafl-response-metrics.patch`, an independent AFLNet-style response-code
+observer that does not feed StateAFL scheduling, coverage, or corpus decisions.
 
 Run it through the same entry point as AFLNet and ChatAFL:
 
@@ -232,9 +235,10 @@ when the top-level experiment command exits. Concurrent top-level StateAFL
 commands are serialized to prevent one command from restoring the settings
 while another experiment is still running.
 
-StateAFL uses replay-format seed corpora. The ProFuzzBench replay corpora are
-used where available; the Lighttpd image deterministically converts its HTTP
-seeds to replay format during the image build.
+StateAFL uses replay-format seed corpora. Every replay corpus contains the same
+seed files and request bytes as the corresponding AFLNet `in-*` corpus; only
+the per-request length prefixes required by StateAFL are added. The Lighttpd
+image performs this deterministic conversion during the image build.
 
 StateAFL exports results through the same ProFuzzBench archive contract as
 AFLNet and ChatAFL. The common executor copies
@@ -393,9 +397,14 @@ VOLTRON_COMPLIANCE_ANALYZER=<command> ./run.sh 1 30 lightftp voltron
 ```
 
 Voltron state metrics are adapted to ProFuzzBench's `nodes` and `edges` series
-using distinct response types and response transitions. Voltron's replay-based
-code coverage remains experimental, so the runner preserves the
-`cov_over_time.csv` file contract without inventing synthetic coverage values.
+using distinct response types and response transitions. After fuzzing, retained
+Voltron `Conversation` test cases are exported to AFLNet's length-prefixed
+replay format and replayed against the target's gcov build with the same
+`aflnet-replay`, `cov_script`, and `gcovr` pipeline used by the other fuzzers.
+The resulting line and branch coverage measurements are stored in
+`cov_over_time.csv`. The export mapping is preserved in
+`voltron_aflnet_replay_manifest.csv`; if Voltron retains no replayable test
+cases, the coverage file contains only its schema header.
 
 ## Progress Monitoring
 

@@ -65,6 +65,40 @@ VOLTRON_KEY_POOL_LOCK="${VOLTRON_KEY_POOL_COUNTER}.lock"
 VOLTRON_USE_API_GATEWAY=${VOLTRON_USE_API_GATEWAY:-0}
 voltron_llm_profiles=()
 
+case "$TARGET" in
+  live555)
+    TARGET_COVERAGE_SCRIPT="$ROOT/benchmark/subjects/RTSP/Live555/cov_script.sh"
+    ;;
+  kamailio)
+    TARGET_COVERAGE_SCRIPT="$ROOT/benchmark/subjects/SIP/Kamailio/cov_script.sh"
+    ;;
+  exim)
+    TARGET_COVERAGE_SCRIPT="$ROOT/benchmark/subjects/SMTP/Exim/cov_script.sh"
+    ;;
+  forked-daapd)
+    TARGET_COVERAGE_SCRIPT="$ROOT/benchmark/subjects/DAAP/forked-daapd/cov_script.sh"
+    ;;
+  pure-ftpd)
+    TARGET_COVERAGE_SCRIPT="$ROOT/benchmark/subjects/FTP/PureFTPD/cov_script.sh"
+    ;;
+  proftpd)
+    TARGET_COVERAGE_SCRIPT="$ROOT/benchmark/subjects/FTP/ProFTPD/cov_script.sh"
+    ;;
+  bftpd)
+    TARGET_COVERAGE_SCRIPT="$ROOT/benchmark/subjects/FTP/BFTPD/cov_script.sh"
+    ;;
+  lightftp)
+    TARGET_COVERAGE_SCRIPT="$ROOT/benchmark/subjects/FTP/LightFTP/cov_script.sh"
+    ;;
+  lighttpd1)
+    TARGET_COVERAGE_SCRIPT="$ROOT/benchmark/subjects/HTTP/Lighttpd1/cov_script.sh"
+    ;;
+  *)
+    printf 'VOLTRON: no coverage script for target %s\n' "$TARGET" >&2
+    exit 2
+    ;;
+esac
+
 load_llm_profiles() {
   local profile_data
 
@@ -116,6 +150,9 @@ for i in $(seq 1 "$RUNS"); do
     run --cpus=1 -d -it
     --mount "type=bind,src=${VOLTRON_SOURCE},dst=/opt/voltron-src,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_voltron_container.sh,dst=/opt/voltron-benchmark-runner.sh,readonly"
+    --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_export_voltron_replay.py,dst=/opt/voltron-export-aflnet-replay.py,readonly"
+    --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_voltron_coverage.sh,dst=/opt/voltron-coverage.sh,readonly"
+    --mount "type=bind,src=${TARGET_COVERAGE_SCRIPT},dst=/opt/voltron-target-cov-script.sh,readonly"
     --mount "type=bind,src=${UV_CACHE},dst=/home/ubuntu/.cache/uv"
     -e UV_CACHE_DIR=/home/ubuntu/.cache/uv
     -e UV_PYTHON_INSTALL_DIR=/home/ubuntu/.cache/uv/python

@@ -6,12 +6,12 @@ ARG MAKE_OPT
 # Set up StateAFL
 ENV STATEAFL="/home/ubuntu/stateafl"
 
-COPY --chown=ubuntu:ubuntu stateafl-benchmark.patch ${WORKDIR}/stateafl-benchmark.patch
+COPY --chown=ubuntu:ubuntu stateafl-response-metrics.patch ${WORKDIR}/stateafl-response-metrics.patch
 
 RUN git clone https://github.com/stateafl/stateafl.git $STATEAFL && \
     cd $STATEAFL && \
     git checkout d923e22f7b2688db45b08f3fa3a29a566e7ff3a4 && \
-    patch -p1 < ${WORKDIR}/stateafl-benchmark.patch && \
+    patch -p1 < ${WORKDIR}/stateafl-response-metrics.patch && \
     make clean all $MAKE_OPT && \
     rm as && \
     cd llvm_mode && make $MAKE_OPT

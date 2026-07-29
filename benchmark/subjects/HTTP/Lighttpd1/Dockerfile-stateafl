@@ -7,13 +7,13 @@ ARG MAKE_OPT
 ENV STATEAFL="/home/ubuntu/stateafl"
 
 COPY --chown=ubuntu:ubuntu stateafl-initial-state.patch ${WORKDIR}/stateafl-initial-state.patch
-COPY --chown=ubuntu:ubuntu stateafl-benchmark.patch ${WORKDIR}/stateafl-benchmark.patch
+COPY --chown=ubuntu:ubuntu stateafl-response-metrics.patch ${WORKDIR}/stateafl-response-metrics.patch
 
 RUN git clone https://github.com/stateafl/stateafl.git $STATEAFL && \
     cd $STATEAFL && \
     git checkout d923e22f7b2688db45b08f3fa3a29a566e7ff3a4 && \
     patch -p1 < ${WORKDIR}/stateafl-initial-state.patch && \
-    patch -p1 < ${WORKDIR}/stateafl-benchmark.patch && \
+    patch -p1 < ${WORKDIR}/stateafl-response-metrics.patch && \
     make clean all $MAKE_OPT && \
     rm as && \
     cd llvm_mode && make $MAKE_OPT
@@ -35,7 +35,7 @@ RUN cd $WORKDIR && \
 # StateAFL consumes replayable seeds: a 32-bit message length followed by data.
 RUN mkdir ${WORKDIR}/in-http-replay && \
     for seed in ${WORKDIR}/in-http/*; do \
-      output="${WORKDIR}/in-http-replay/$(basename "${seed}" .raw).replay"; \
+      output="${WORKDIR}/in-http-replay/$(basename "${seed}")"; \
       python3 -c 'import pathlib, struct, sys; data = pathlib.Path(sys.argv[1]).read_bytes(); pathlib.Path(sys.argv[2]).write_bytes(struct.pack("<I", len(data)) + data)' "${seed}" "${output}"; \
     done
 

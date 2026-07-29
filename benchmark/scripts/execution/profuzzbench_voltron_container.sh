@@ -79,6 +79,17 @@ run_compliance_analysis() {
     --output "$OUTDIR" >> "$log_file" 2>&1
 }
 
+run_code_coverage() {
+  local result_dir
+
+  result_dir=$(realpath "$OUTDIR")
+  printf 'Exporting Voltron test cases for AFLNet coverage replay\n'
+  uv run python /opt/voltron-export-aflnet-replay.py \
+    --result-dir "$result_dir" || return
+  /bin/bash /opt/voltron-coverage.sh \
+    "$TARGET" "$result_dir" "$SKIPCOUNT"
+}
+
 uv run cli.py \
   --sut "$VOLTRON_TARGET" \
   --algorithm state \
@@ -102,14 +113,14 @@ record_status
 run_compliance_analysis
 COMPLIANCE_STATUS=$?
 
-# Voltron's replay-based code coverage is still experimental. Keep the
-# ProFuzzBench file contract without inventing coverage measurements.
-if [ ! -f "$OUTDIR/cov_over_time.csv" ]; then
-  echo "Time,l_per,l_abs,b_per,b_abs" > "$OUTDIR/cov_over_time.csv"
-fi
+run_code_coverage
+COVERAGE_STATUS=$?
 
 tar -zcf "${OUTDIR}.tar.gz" "$OUTDIR"
 if [ "$STATUS" -ne 0 ]; then
   exit "$STATUS"
 fi
-exit "$COMPLIANCE_STATUS"
+if [ "$COMPLIANCE_STATUS" -ne 0 ]; then
+  exit "$COMPLIANCE_STATUS"
+fi
+exit "$COVERAGE_STATUS"

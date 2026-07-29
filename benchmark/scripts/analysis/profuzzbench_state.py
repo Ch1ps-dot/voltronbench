@@ -45,7 +45,10 @@ def main(csv_file, put, runs, cut_off, step, out_file, fuzzers):
 
         run_frames = []
         for run in range(1, runs + 1):
-          df2 = df1[df1['run'] == run].sort_values('time')
+          # Metrics can grow several times within one second. Preserve archive
+          # order for equal timestamps so the last row remains the latest
+          # cumulative graph size.
+          df2 = df1[df1['run'] == run].sort_values('time', kind='stable')
           if df2.empty:
             print(
                 "No {} state data for {} run {}; excluding it from the mean.".format(

@@ -18,6 +18,9 @@ if [ $append = "0" ]; then
   rm -f "$states_data"
   touch "$states_data"
   echo "time,subject,fuzzer,run,state_type,state" >> "$states_data"
+
+  # This legacy file mixed StateAFL memory states with AFLNet response states.
+  rm -f stateafl_memory_states.csv
 fi
 
 #remove space(s) 
@@ -106,21 +109,94 @@ convert_state() {
   rm -f "$converted"
 }
 
+convert_response_state() {
+  local fuzzer=$1
+  local subject=$2
+  local run_index=$3
+  local ifile=$4
+  local ofile=$5
+  local converted
+
+  converted=$(mktemp)
+  if ! awk -F',' \
+      -v subject="$subject" \
+      -v fuzzer="$fuzzer" \
+      -v run_index="$run_index" '
+    function trim(value) {
+      gsub(/^[[:space:]#]+/, "", value)
+      gsub(/[[:space:]]+$/, "", value)
+      return value
+    }
+
+    NR == 1 {
+      for (column_index = 1; column_index <= NF; column_index++) {
+        columns[trim($column_index)] = column_index
+      }
+      if (!("unix_time" in columns) ||
+          !("response_state_num" in columns) ||
+          !("response_transition_num" in columns)) {
+        print "StateAFL response metrics schema error: expected unix_time,response_state_num,response_transition_num in " FILENAME > "/dev/stderr"
+        exit 2
+      }
+      next
+    }
+
+    {
+      time = trim($(columns["unix_time"]))
+      nodes = trim($(columns["response_state_num"]))
+      edges = trim($(columns["response_transition_num"]))
+      if (time !~ /^[0-9]+$/ || nodes !~ /^[0-9]+$/ || edges !~ /^[0-9]+$/) {
+        print "StateAFL response metrics value error in " FILENAME " at line " NR > "/dev/stderr"
+        exit 3
+      }
+      print time "," subject "," fuzzer "," run_index ",nodes," nodes
+      print time "," subject "," fuzzer "," run_index ",edges," edges
+    }
+  ' "$ifile" > "$converted"; then
+    rm -f "$converted"
+    return 1
+  fi
+
+  cat "$converted" >> "$ofile"
+  rm -f "$converted"
+}
+
 #extract tar files & process the data
 status=0
 for fuzzer in $fuzzers; do 
   for i in $(seq 1 $runs); do 
     printf "\nProcessing out-${prog}-${fuzzer}-${i} ..."
     rm -rf out-${prog}-${fuzzer}-${i}
-    #tar -zxvf out-${prog}-${fuzzer}_${i}.tar.gz > /dev/null 2>&1
-    tar -axf out-${prog}-${fuzzer}_${i}.tar.gz out-${prog}-${fuzzer}/cov_over_time.csv
-    tar -axf out-${prog}-${fuzzer}_${i}.tar.gz out-${prog}-${fuzzer}/plot_data
+    archive="out-${prog}-${fuzzer}_${i}.tar.gz"
+    output_dir="out-${prog}-${fuzzer}"
+    members=("${output_dir}/cov_over_time.csv")
+    if [ "$fuzzer" = "stateafl" ]; then
+      members+=("${output_dir}/response_ipsm_metrics.csv")
+    else
+      members+=("${output_dir}/plot_data")
+    fi
+    if ! tar -axf "$archive" "${members[@]}"; then
+      if [ "$fuzzer" = "stateafl" ]; then
+        echo "StateAFL response metrics unavailable in $archive; refusing to compare memory states with AFLNet response states." >&2
+      fi
+      status=1
+      rm -rf "$output_dir"
+      continue
+    fi
     mv out-${prog}-${fuzzer} out-${prog}-${fuzzer}-${i}
     #combine all csv files
     if [ -s out-${prog}-${fuzzer}-${i}/cov_over_time.csv ]; then
       convert $fuzzer $prog $i out-${prog}-${fuzzer}-${i}/cov_over_time.csv $covfile
     fi
-    if [ -s out-${prog}-${fuzzer}-${i}/plot_data ]; then
+    if [ "$fuzzer" = "stateafl" ]; then
+      if ! convert_response_state \
+          "$fuzzer" "$prog" "$i" \
+          "out-${prog}-${fuzzer}-${i}/response_ipsm_metrics.csv" \
+          "$states_data"; then
+        status=1
+      fi
+
+    elif [ -s out-${prog}-${fuzzer}-${i}/plot_data ]; then
       if ! convert_state \
           "$fuzzer" "$prog" "$i" \
           "out-${prog}-${fuzzer}-${i}/plot_data" "$states_data"; then
