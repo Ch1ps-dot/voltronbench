@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "chat-llm.h"
+#include "chatafl-runtime-config.h"
 #include "alloc-inl.h"
 #include "hash.h"
 
@@ -48,21 +49,45 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
     CURL *curl;
     CURLcode res = CURLE_OK;
     char *answer = NULL;
-    char *url = NULL;
+    const char *configured_model = chatafl_runtime_model(MODEL);
+    const char *url = chatafl_runtime_url(URL);
+    char *configured_api_key = chatafl_runtime_api_key(OPENAI_TOKEN);
+    char *auth_header = NULL;
+    json_object *model_json = NULL;
+    const char *encoded_model = NULL;
 
-    url = URL;
-    char *auth_header = "Authorization: Bearer " OPENAI_TOKEN;
+    if (configured_api_key == NULL)
+    {
+        fprintf(stderr, "Unable to read the configured ChatAFL API key.\n");
+        return NULL;
+    }
+    if (asprintf(&auth_header, "Authorization: Bearer %s",
+                 configured_api_key) < 0)
+    {
+        free(configured_api_key);
+        return NULL;
+    }
     char *content_header = "Content-Type: application/json";
     char *accept_header = "Accept: application/json";
     char *data = NULL;
+    model_json = json_object_new_string(configured_model);
+    if (model_json == NULL)
+    {
+        free(auth_header);
+        free(configured_api_key);
+        return NULL;
+    }
+    encoded_model = json_object_to_json_string_ext(
+        model_json, JSON_C_TO_STRING_PLAIN);
     if (strcmp(model, "instruct") == 0)
     {
-        asprintf(&data, "{\"model\": \"%s\", \"messages\": [{\"role\": \"system\", \"content\": \"You are a helpful assistant.\"}, {\"role\": \"user\", \"content\": \"%s\"}], \"max_tokens\": %d, \"temperature\": %f}", MODEL, prompt, MAX_OUTPUT_TOKENS, temperature);
+        asprintf(&data, "{\"model\": %s, \"messages\": [{\"role\": \"system\", \"content\": \"You are a helpful assistant.\"}, {\"role\": \"user\", \"content\": \"%s\"}], \"max_tokens\": %d, \"temperature\": %f}", encoded_model, prompt, MAX_OUTPUT_TOKENS, temperature);
     }
     else
     {
-        asprintf(&data, "{\"model\": \"%s\",\"messages\": %s, \"max_tokens\": %d, \"temperature\": %f}", MODEL, prompt, MAX_OUTPUT_TOKENS, temperature);
+        asprintf(&data, "{\"model\": %s,\"messages\": %s, \"max_tokens\": %d, \"temperature\": %f}", encoded_model, prompt, MAX_OUTPUT_TOKENS, temperature);
     }
+    json_object_put(model_json);
     curl_global_init(CURL_GLOBAL_DEFAULT);
     do
     {
@@ -128,6 +153,8 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
     {
         free(data);
     }
+    free(auth_header);
+    free(configured_api_key);
 
     curl_global_cleanup();
     return answer;

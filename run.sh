@@ -24,6 +24,7 @@ CORE_PATTERN_CHANGED=0
 RANDOMIZE_VA_SPACE_PATH=/proc/sys/kernel/randomize_va_space
 RANDOMIZE_VA_SPACE_ORIGINAL=
 RANDOMIZE_VA_SPACE_CHANGED=0
+CHATAFL_EPHEMERAL_API_KEY_FILE=
 
 write_kernel_setting() {
     local path=$1
@@ -40,8 +41,6 @@ write_kernel_setting() {
 }
 
 restore_stateafl_kernel_settings() {
-    local status=$?
-
     if [[ "$RANDOMIZE_VA_SPACE_CHANGED" == "1" ]]; then
         if write_kernel_setting \
             "$RANDOMIZE_VA_SPACE_PATH" \
@@ -60,6 +59,19 @@ restore_stateafl_kernel_settings() {
         fi
     fi
 
+    return 0
+}
+
+cleanup_run_environment() {
+    local status=$?
+
+    trap - EXIT
+    if [[ -n "$CHATAFL_EPHEMERAL_API_KEY_FILE" ]]; then
+        if ! rm -f -- "$CHATAFL_EPHEMERAL_API_KEY_FILE"; then
+            echo "Warning: failed to remove the temporary ChatAFL API key." >&2
+        fi
+    fi
+    restore_stateafl_kernel_settings || true
     return "$status"
 }
 
@@ -90,7 +102,6 @@ prepare_stateafl_kernel_settings() {
         fi
     done
 
-    trap restore_stateafl_kernel_settings EXIT
     CORE_PATTERN_ORIGINAL=$(<"$CORE_PATTERN_PATH")
     RANDOMIZE_VA_SPACE_ORIGINAL=$(<"$RANDOMIZE_VA_SPACE_PATH")
 
@@ -126,7 +137,73 @@ prepare_stateafl_kernel_settings() {
     fi
 }
 
+trap cleanup_run_environment EXIT
 prepare_stateafl_kernel_settings
+
+uses_chatafl=0
+for fuzzer in ${FUZZER_LIST//,/ }; do
+    if [[ "$fuzzer" == "chatafl" || "$fuzzer" == "all" ]]; then
+        uses_chatafl=1
+        break
+    fi
+done
+
+prepare_chatafl_runtime_inputs() {
+    if [[ "${CHATAFL_MODEL:-}" == *$'\n'* \
+        || "${CHATAFL_MODEL:-}" == *$'\r'* ]]; then
+        echo "CHATAFL_MODEL must not contain a newline." >&2
+        exit 1
+    fi
+    if [[ "${CHATAFL_URL:-}" == *$'\n'* \
+        || "${CHATAFL_URL:-}" == *$'\r'* ]]; then
+        echo "CHATAFL_URL must not contain a newline." >&2
+        exit 1
+    fi
+    if [[ -n "${CHATAFL_API_KEY:-}" \
+        && -n "${CHATAFL_API_KEY_FILE:-}" ]]; then
+        echo "Set only one of CHATAFL_API_KEY and CHATAFL_API_KEY_FILE." >&2
+        exit 1
+    fi
+
+    CHATAFL_API_KEY_SOURCE=compiled_default
+    if [[ -n "${CHATAFL_API_KEY_FILE:-}" ]]; then
+        if [[ ! -f "$CHATAFL_API_KEY_FILE" \
+            || ! -s "$CHATAFL_API_KEY_FILE" \
+            || ! -r "$CHATAFL_API_KEY_FILE" ]]; then
+            echo "ChatAFL API key file is empty or not readable." >&2
+            exit 1
+        fi
+        CHATAFL_API_KEY_FILE=$(readlink -f "$CHATAFL_API_KEY_FILE")
+        CHATAFL_API_KEY_MODE=$(stat -c '%a' "$CHATAFL_API_KEY_FILE")
+        if (( (8#${CHATAFL_API_KEY_MODE} & 8#077) != 0 )); then
+            echo "ChatAFL API key file must not be accessible by group or others." >&2
+            exit 1
+        fi
+        CHATAFL_API_KEY_SOURCE=runtime_secret_file
+    elif [[ -n "${CHATAFL_API_KEY:-}" ]]; then
+        if [[ "$CHATAFL_API_KEY" == *$'\n'* \
+            || "$CHATAFL_API_KEY" == *$'\r'* ]]; then
+            echo "CHATAFL_API_KEY must not contain a newline." >&2
+            exit 1
+        fi
+        CHATAFL_SECRET_ROOT="$PROJECT_ROOT/.runtime/chatafl/secrets"
+        mkdir -p "$CHATAFL_SECRET_ROOT"
+        chmod 0700 "$CHATAFL_SECRET_ROOT"
+        CHATAFL_EPHEMERAL_API_KEY_FILE=$(
+            mktemp "$CHATAFL_SECRET_ROOT/api-key.XXXXXX"
+        )
+        chmod 0600 "$CHATAFL_EPHEMERAL_API_KEY_FILE"
+        printf '%s' "$CHATAFL_API_KEY" \
+            > "$CHATAFL_EPHEMERAL_API_KEY_FILE"
+        CHATAFL_API_KEY_FILE="$CHATAFL_EPHEMERAL_API_KEY_FILE"
+        CHATAFL_API_KEY_SOURCE=runtime_ephemeral_secret
+        unset CHATAFL_API_KEY
+    fi
+}
+
+if [[ "$uses_chatafl" == "1" ]]; then
+    prepare_chatafl_runtime_inputs
+fi
 
 uses_voltron=0
 for fuzzer in ${FUZZER_LIST//,/ }; do
@@ -163,6 +240,77 @@ fi
 RUN_ID=$(basename "$RUN_ROOT")
 PARAMETERS_FILE="$RUN_ROOT/experiment_parameters.txt"
 
+metadata_value() {
+    local key=$1
+    local metadata_file=$2
+
+    awk -F= -v key="$key" '
+        $1 == key {
+            sub(/^[^=]*=/, "")
+            print
+            exit
+        }
+    ' "$metadata_file"
+}
+
+if [[ "$uses_chatafl" == "1" ]]; then
+    CHATAFL_BUILDER_IMAGE="${CHATAFL_BUILDER_IMAGE:-lightftp-vol}"
+    if [[ -z "${CHATAFL_RUNTIME_BINARY:-}" ]]; then
+        CHATAFL_RUNTIME_BINARY=$(
+            "$PROJECT_ROOT/scripts/prepare_chatafl_runtime.sh" \
+                "$CHATAFL_BUILDER_IMAGE"
+        )
+    fi
+    if [[ ! -x "$CHATAFL_RUNTIME_BINARY" ]]; then
+        echo "ChatAFL runtime binary is not executable: $CHATAFL_RUNTIME_BINARY" >&2
+        exit 1
+    fi
+
+    CHATAFL_RUNTIME_METADATA="${CHATAFL_RUNTIME_BINARY%/*}/metadata.txt"
+    CHATAFL_COMPILED_DEFAULT_MODEL=
+    CHATAFL_COMPILED_DEFAULT_URL=
+    CHATAFL_RUNTIME_SOURCE_SHA256=unknown
+    CHATAFL_RUNTIME_BUILDER_IMAGE=custom
+    CHATAFL_RUNTIME_BUILDER_IMAGE_ID=unknown
+    if [[ -f "$CHATAFL_RUNTIME_METADATA" ]]; then
+        CHATAFL_COMPILED_DEFAULT_MODEL=$(
+            metadata_value compiled_default_model "$CHATAFL_RUNTIME_METADATA"
+        )
+        CHATAFL_COMPILED_DEFAULT_URL=$(
+            metadata_value compiled_default_url "$CHATAFL_RUNTIME_METADATA"
+        )
+        CHATAFL_RUNTIME_SOURCE_SHA256=$(
+            metadata_value runtime_source_sha256 "$CHATAFL_RUNTIME_METADATA"
+        )
+        CHATAFL_RUNTIME_BUILDER_IMAGE=$(
+            metadata_value builder_image "$CHATAFL_RUNTIME_METADATA"
+        )
+        CHATAFL_RUNTIME_BUILDER_IMAGE_ID=$(
+            metadata_value builder_image_id "$CHATAFL_RUNTIME_METADATA"
+        )
+    fi
+
+    CHATAFL_MODEL_EFFECTIVE="${CHATAFL_MODEL:-$CHATAFL_COMPILED_DEFAULT_MODEL}"
+    CHATAFL_URL_EFFECTIVE="${CHATAFL_URL:-$CHATAFL_COMPILED_DEFAULT_URL}"
+    if [[ -z "$CHATAFL_MODEL_EFFECTIVE" ]]; then
+        echo "Set CHATAFL_MODEL when using a custom ChatAFL runtime binary." >&2
+        exit 1
+    fi
+    if [[ -z "$CHATAFL_URL_EFFECTIVE" ]]; then
+        echo "Set CHATAFL_URL when using a custom ChatAFL runtime binary." >&2
+        exit 1
+    fi
+    CHATAFL_RUNTIME_BINARY_SHA256=$(
+        sha256sum "$CHATAFL_RUNTIME_BINARY" | cut -d ' ' -f 1
+    )
+    export CHATAFL_RUNTIME_BINARY
+    export CHATAFL_MODEL_EFFECTIVE
+    export CHATAFL_URL_EFFECTIVE
+    if [[ -n "${CHATAFL_API_KEY_FILE:-}" ]]; then
+        export CHATAFL_API_KEY_FILE
+    fi
+fi
+
 {
     printf 'run_id=%s\n' "$RUN_ID"
     printf 'created_at=%s\n' "$(date --iso-8601=seconds)"
@@ -173,6 +321,19 @@ PARAMETERS_FILE="$RUN_ROOT/experiment_parameters.txt"
     printf 'skipcount=%s\n' "$SKIPCOUNT"
     printf 'test_timeout_ms=%s\n' "$TEST_TIMEOUT"
     printf 'raw_results_root=%s\n' "$RUN_ROOT"
+    if [[ "$uses_chatafl" == "1" ]]; then
+        printf 'chatafl_model=%s\n' "$CHATAFL_MODEL_EFFECTIVE"
+        printf 'chatafl_url=%s\n' "$CHATAFL_URL_EFFECTIVE"
+        printf 'chatafl_api_key_source=%s\n' "$CHATAFL_API_KEY_SOURCE"
+        printf 'chatafl_runtime_binary_sha256=%s\n' \
+            "$CHATAFL_RUNTIME_BINARY_SHA256"
+        printf 'chatafl_runtime_source_sha256=%s\n' \
+            "$CHATAFL_RUNTIME_SOURCE_SHA256"
+        printf 'chatafl_runtime_builder_image=%s\n' \
+            "$CHATAFL_RUNTIME_BUILDER_IMAGE"
+        printf 'chatafl_runtime_builder_image_id=%s\n' \
+            "$CHATAFL_RUNTIME_BUILDER_IMAGE_ID"
+    fi
 } > "$PARAMETERS_FILE"
 
 echo

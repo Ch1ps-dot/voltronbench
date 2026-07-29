@@ -109,15 +109,9 @@ Build all benchmark Docker images:
 ./setup.sh
 ```
 
-ChatAFL's LLM configuration is compiled into its source during setup. Supply it
-through environment variables when needed:
-
-```bash
-CHATAFL_API_KEY=... \
-CHATAFL_MODEL=... \
-CHATAFL_URL=... \
-./setup.sh
-```
+ChatAFL model, URL, and API key are selected at experiment runtime. They are
+not written into its source by `setup.sh`; see
+[Run Experiments](#run-experiments).
 
 The build script skips images that already exist. Force a rebuild with:
 
@@ -161,9 +155,58 @@ Examples:
 
 ```bash
 ./run.sh 1 30 lightftp voltron
-./run.sh 3 240 bftpd,proftpd,pure-ftpd aflnet,chatafl,stateafl,voltron
-./run.sh 1 60 all aflnet,chatafl,stateafl
+CHATAFL_MODEL=gpt-4.1 \
+CHATAFL_URL=https://api.example.com/v1/chat/completions \
+CHATAFL_API_KEY_FILE=/secure/path/chatafl-api-key \
+./run.sh 1 30 lightftp chatafl
+CHATAFL_MODEL=gpt-4.1 \
+  ./run.sh 3 240 bftpd,proftpd,pure-ftpd aflnet,chatafl,stateafl,voltron
 ```
+
+When ChatAFL is selected, `run.sh` compiles a small runtime `afl-fuzz` artifact
+inside the existing `lightftp-vol` image, caches it under
+`.runtime/chatafl/`, and mounts it over `/home/ubuntu/chatafl/afl-fuzz` in each
+ChatAFL container. It does not run `docker build` or modify any target image.
+Changing `CHATAFL_MODEL`, `CHATAFL_URL`, or the API key reuses the cached
+binary:
+
+```bash
+CHATAFL_MODEL=model-a CHATAFL_URL=https://api-a.example/v1/chat/completions \
+  CHATAFL_API_KEY_FILE=/secure/path/key-a \
+  ./run.sh 1 30 lightftp chatafl
+CHATAFL_MODEL=model-b CHATAFL_URL=https://api-b.example/v1/chat/completions \
+  CHATAFL_API_KEY_FILE=/secure/path/key-b \
+  ./run.sh 1 30 lightftp chatafl
+```
+
+The API-key file must be readable by the current user and inaccessible to group
+and other users, for example:
+
+```bash
+mkdir -p .runtime
+install -m 600 /dev/null .runtime/chatafl-api-key
+printf '%s' 'replace-with-the-key' > .runtime/chatafl-api-key
+```
+
+For compatibility, `CHATAFL_API_KEY=...` is also accepted by `run.sh`. It is
+immediately copied to a temporary mode-`0600` file under
+`.runtime/chatafl/secrets/`, removed from the child environment, mounted
+read-only into ChatAFL containers, and deleted when `run.sh` exits. The key
+itself is never written to experiment metadata or passed as a Docker
+environment variable.
+
+If `lightftp-vol` is unavailable, select any existing active target image as
+the compatible Ubuntu 20.04 builder:
+
+```bash
+CHATAFL_BUILDER_IMAGE=proftpd-vol \
+CHATAFL_MODEL=gpt-4.1 \
+./run.sh 1 30 proftpd chatafl
+```
+
+Unset runtime values fall back to the model, URL, or API key already compiled
+into an existing builder image. Newly built images retain the tracked
+placeholders, so explicit runtime settings are recommended for experiments.
 
 Supported fuzzer names are:
 
@@ -195,9 +238,13 @@ res_experiment_<run-id>.tar.gz
 
 The archive contains the experiment parameters and one timestamped analysis
 directory per subject. Each subject directory includes the original run
-archives, generated CSV files, and coverage/state plots. The unique run ID
-prevents sequential or concurrent `run.sh` invocations from overwriting each
-other's raw archives, analysis files, or combined bundles.
+archives, generated CSV files, and coverage/state plots. ChatAFL runs add the
+effective model, URL, API-key source (never the key), runtime source hash,
+binary hash, and builder-image ID to `experiment_parameters.txt`; each
+`results-<subject>` directory also contains
+`chatafl_runtime_metadata.txt`. The unique run ID prevents sequential or
+concurrent `run.sh` invocations from overwriting each other's raw archives,
+analysis files, or combined bundles.
 
 This archive naming is shared by AFLNet, ChatAFL, StateAFL, and Voltron. For
 example, a single LightFTP StateAFL replication writes:
@@ -535,8 +582,12 @@ Remove copied fuzzer source trees from subject directories:
 
 ## Development Notes
 
-- Changes to AFLNet, ChatAFL, StateAFL Dockerfiles, or target build contexts
+- Changes to AFLNet, StateAFL, target Dockerfiles, or target build contexts
   require image rebuilds.
+- Changing `CHATAFL_MODEL`, `CHATAFL_URL`, or the ChatAFL API-key secret does
+  not require an image rebuild. Runtime configuration support is prepared and
+  cached by `scripts/prepare_chatafl_runtime.sh`; broader ChatAFL changes
+  outside that runtime overlay still require updating the image build.
 - Voltron changes do not require target image rebuilds; use `VOLTRON_REF` or
   `VOLTRON_SOURCE_DIR`.
 - `SKIPCOUNT` controls how often progress samples are recorded.

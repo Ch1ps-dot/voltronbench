@@ -13,6 +13,7 @@ DELETE=${9:-}
 
 WORKDIR="/home/ubuntu/experiments"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
 source "$SCRIPT_DIR/profuzzbench_monitor_common.sh"
 
 #keep all container ids
@@ -20,6 +21,103 @@ cids=()
 MONITOR_PID=""
 LABEL="${FUZZER} on ${DOCIMAGE}"
 PROFUZZBENCH_RUN_START_EPOCH=$(date +%s)
+
+metadata_value() {
+  local key=$1
+  local metadata_file=$2
+
+  awk -F= -v key="$key" '
+    $1 == key {
+      sub(/^[^=]*=/, "")
+      print
+      exit
+    }
+  ' "$metadata_file"
+}
+
+if [[ "$FUZZER" == "chatafl" ]]; then
+  if [[ -z "${CHATAFL_RUNTIME_BINARY:-}" ]]; then
+    CHATAFL_RUNTIME_BINARY=$(
+      "$PROJECT_ROOT/scripts/prepare_chatafl_runtime.sh" \
+        "${CHATAFL_BUILDER_IMAGE:-$DOCIMAGE}"
+    )
+  fi
+  if [[ ! -x "$CHATAFL_RUNTIME_BINARY" ]]; then
+    printf 'ChatAFL runtime binary is not executable: %s\n' \
+      "$CHATAFL_RUNTIME_BINARY" >&2
+    exit 1
+  fi
+
+  CHATAFL_RUNTIME_METADATA="${CHATAFL_RUNTIME_BINARY%/*}/metadata.txt"
+  CHATAFL_COMPILED_DEFAULT_MODEL=
+  CHATAFL_COMPILED_DEFAULT_URL=
+  if [[ -f "$CHATAFL_RUNTIME_METADATA" ]]; then
+    CHATAFL_COMPILED_DEFAULT_MODEL=$(
+      metadata_value compiled_default_model "$CHATAFL_RUNTIME_METADATA"
+    )
+    CHATAFL_COMPILED_DEFAULT_URL=$(
+      metadata_value compiled_default_url "$CHATAFL_RUNTIME_METADATA"
+    )
+  fi
+  CHATAFL_MODEL_EFFECTIVE="${CHATAFL_MODEL_EFFECTIVE:-${CHATAFL_MODEL:-$CHATAFL_COMPILED_DEFAULT_MODEL}}"
+  CHATAFL_URL_EFFECTIVE="${CHATAFL_URL_EFFECTIVE:-${CHATAFL_URL:-$CHATAFL_COMPILED_DEFAULT_URL}}"
+  if [[ -z "$CHATAFL_MODEL_EFFECTIVE" ]]; then
+    printf 'Set CHATAFL_MODEL when using a custom ChatAFL runtime binary.\n' >&2
+    exit 1
+  fi
+  if [[ -z "$CHATAFL_URL_EFFECTIVE" ]]; then
+    printf 'Set CHATAFL_URL when using a custom ChatAFL runtime binary.\n' >&2
+    exit 1
+  fi
+  if [[ "$CHATAFL_MODEL_EFFECTIVE" == *$'\n'* \
+    || "$CHATAFL_MODEL_EFFECTIVE" == *$'\r'* ]]; then
+    printf 'CHATAFL_MODEL must not contain a newline.\n' >&2
+    exit 1
+  fi
+  if [[ "$CHATAFL_URL_EFFECTIVE" == *$'\n'* \
+    || "$CHATAFL_URL_EFFECTIVE" == *$'\r'* ]]; then
+    printf 'CHATAFL_URL must not contain a newline.\n' >&2
+    exit 1
+  fi
+  if [[ -n "${CHATAFL_API_KEY:-}" \
+    && -z "${CHATAFL_API_KEY_FILE:-}" ]]; then
+    printf 'The common executor accepts API keys only through CHATAFL_API_KEY_FILE.\n' >&2
+    printf 'Use run.sh to convert CHATAFL_API_KEY into a temporary secret file.\n' >&2
+    exit 1
+  fi
+
+  CHATAFL_API_KEY_SOURCE=compiled_default
+  if [[ -n "${CHATAFL_API_KEY_FILE:-}" ]]; then
+    if [[ ! -f "$CHATAFL_API_KEY_FILE" \
+      || ! -s "$CHATAFL_API_KEY_FILE" \
+      || ! -r "$CHATAFL_API_KEY_FILE" ]]; then
+      printf 'ChatAFL API key file is empty or not readable.\n' >&2
+      exit 1
+    fi
+    CHATAFL_API_KEY_FILE=$(readlink -f "$CHATAFL_API_KEY_FILE")
+    CHATAFL_API_KEY_MODE=$(stat -c '%a' "$CHATAFL_API_KEY_FILE")
+    if (( (8#${CHATAFL_API_KEY_MODE} & 8#077) != 0 )); then
+      printf 'ChatAFL API key file must not be accessible by group or others.\n' >&2
+      exit 1
+    fi
+    CHATAFL_API_KEY_SOURCE=runtime_secret_file
+  fi
+
+  mkdir -p "$SAVETO"
+  CHATAFL_RUNTIME_BINARY_SHA256=$(
+    sha256sum "$CHATAFL_RUNTIME_BINARY" | cut -d ' ' -f 1
+  )
+  {
+    printf 'effective_model=%s\n' "$CHATAFL_MODEL_EFFECTIVE"
+    printf 'effective_url=%s\n' "$CHATAFL_URL_EFFECTIVE"
+    printf 'api_key_source=%s\n' "$CHATAFL_API_KEY_SOURCE"
+    printf 'runtime_binary_sha256=%s\n' \
+      "$CHATAFL_RUNTIME_BINARY_SHA256"
+    if [[ -f "$CHATAFL_RUNTIME_METADATA" ]]; then
+      cat "$CHATAFL_RUNTIME_METADATA"
+    fi
+  } > "$SAVETO/chatafl_runtime_metadata.txt"
+fi
 
 collect_results() {
   local index=1
@@ -59,7 +157,22 @@ trap handle_interrupt INT TERM
 
 #create one container for each run
 for i in $(seq 1 $RUNS); do
-  id=$(docker run --cpus=1 -d -it $DOCIMAGE /bin/bash -c "cd ${WORKDIR} && run ${FUZZER} ${OUTDIR} '${OPTIONS}' ${TIMEOUT} ${SKIPCOUNT}")
+  docker_args=(run --cpus=1 -d -it)
+  if [[ "$FUZZER" == "chatafl" ]]; then
+    docker_args+=(
+      --mount "type=bind,src=${CHATAFL_RUNTIME_BINARY},dst=/home/ubuntu/chatafl/afl-fuzz,readonly"
+      --env "CHATAFL_MODEL=${CHATAFL_MODEL_EFFECTIVE}"
+      --env "CHATAFL_URL=${CHATAFL_URL_EFFECTIVE}"
+    )
+    if [[ -n "${CHATAFL_API_KEY_FILE:-}" ]]; then
+      docker_args+=(
+        --mount "type=bind,src=${CHATAFL_API_KEY_FILE},dst=/run/secrets/chatafl_api_key,readonly"
+        --env "CHATAFL_API_KEY_FILE=/run/secrets/chatafl_api_key"
+      )
+    fi
+  fi
+  id=$(docker "${docker_args[@]}" "$DOCIMAGE" /bin/bash -c \
+    "cd ${WORKDIR} && run ${FUZZER} ${OUTDIR} '${OPTIONS}' ${TIMEOUT} ${SKIPCOUNT}")
   cids+=("${id::12}") #store only the first 12 characters of a container ID
 done
 

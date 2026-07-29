@@ -72,6 +72,8 @@ afl-as: afl-as.c afl-as.h $(COMM_HDR) | test_x86
 afl-fuzz: afl-fuzz.c $(COMM_HDR) aflnet.o aflnet.h chat-llm.o chat-llm.h | test_x86
 	$(CC) $(CFLAGS) $@.c aflnet.o chat-llm.o -o $@ $(LDFLAGS) -lcurl -ljson-c -lpcre2-8
 
+chat-llm.o: chat-llm.c chat-llm.h chatafl-runtime-config.h $(COMM_HDR)
+
 afl-replay: afl-replay.c $(COMM_HDR) aflnet.o aflnet.h | test_x86
 	$(CC) $(CFLAGS) $@.c aflnet.o -o $@ $(LDFLAGS)
 
