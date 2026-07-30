@@ -28,6 +28,7 @@ export FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE
 TARGET_LIST="${1:-}"
 FUZZER_LIST="${2:-}"
 RESULTS_ROOT="${RESULTS_ROOT:-$PFBENCH}"
+source "$PFBENCH/scripts/execution/profuzzbench_monitor_common.sh"
 
 SUPPORTED_TARGETS="live555 kamailio exim forked-daapd pure-ftpd proftpd bftpd lightftp lighttpd1"
 SUPPORTED_FUZZERS="aflnet chatafl stateafl voltron"
@@ -136,18 +137,34 @@ run_standard_target() {
 
 run_voltron_target() {
     local target=$1
+    local project_index=${2:-0}
     local result_dir="results-${target}"
     local out_dir="out-${target}-voltron"
+    local launcher_log
 
     mkdir -p "$RESULTS_ROOT/$result_dir"
-    "$PFBENCH/../run_voltron.sh" \
-        "${target}-vol" \
-        "$NUM_CONTAINERS" \
-        "$RESULTS_ROOT/$result_dir" \
-        "$target" \
-        "$out_dir" \
-        "$TIMEOUT" \
-        "$SKIPCOUNT"
+    launcher_log="$RESULTS_ROOT/$result_dir/voltron-launcher.log"
+    if [[ "${PROFUZZBENCH_EXTERNAL_MONITOR:-0}" == "1" ]]; then
+        PROFUZZBENCH_PROJECT_INDEX="$project_index" \
+            "$PFBENCH/../run_voltron.sh" \
+            "${target}-vol" \
+            "$NUM_CONTAINERS" \
+            "$RESULTS_ROOT/$result_dir" \
+            "$target" \
+            "$out_dir" \
+            "$TIMEOUT" \
+            "$SKIPCOUNT" > "$launcher_log" 2>&1
+    else
+        PROFUZZBENCH_PROJECT_INDEX="$project_index" \
+            "$PFBENCH/../run_voltron.sh" \
+            "${target}-vol" \
+            "$NUM_CONTAINERS" \
+            "$RESULTS_ROOT/$result_dir" \
+            "$target" \
+            "$out_dir" \
+            "$TIMEOUT" \
+            "$SKIPCOUNT"
+    fi
 }
 
 if [[ -z "$TARGET_LIST" || -z "$FUZZER_LIST" ]]; then
@@ -182,6 +199,32 @@ for fuzzer in $fuzzers; do
     fi
 done
 
+target_count=0
+for _target in $targets; do
+    target_count=$((target_count + 1))
+done
+fuzzer_count=0
+for _fuzzer in $fuzzers; do
+    fuzzer_count=$((fuzzer_count + 1))
+done
+
+CENTRAL_MONITOR_PID=
+CENTRAL_VOLTRON_MONITOR=0
+if [[ "$PROFUZZBENCH_MONITOR" != "0" \
+    && "$target_count" -gt 1 \
+    && "$fuzzer_count" -eq 1 \
+    && "$fuzzers" == "voltron" ]]; then
+    PROFUZZBENCH_RUN_ID=${PROFUZZBENCH_RUN_ID:-"voltron-$(date +%s)-$$"}
+    PROFUZZBENCH_RUN_START_EPOCH=${PROFUZZBENCH_RUN_START_EPOCH:-$(date +%s)}
+    PROFUZZBENCH_MONITOR_DOCKER_LABEL="voltronbench.run_id=${PROFUZZBENCH_RUN_ID}"
+    PROFUZZBENCH_EXTERNAL_MONITOR=1
+    export PROFUZZBENCH_RUN_ID
+    export PROFUZZBENCH_RUN_START_EPOCH
+    export PROFUZZBENCH_MONITOR_DOCKER_LABEL
+    export PROFUZZBENCH_EXTERNAL_MONITOR
+    CENTRAL_VOLTRON_MONITOR=1
+fi
+
 echo
 echo "# NUM_CONTAINERS: ${NUM_CONTAINERS}"
 echo "# TIMEOUT: ${TIMEOUT} s"
@@ -194,6 +237,7 @@ echo "# FUZZER LIST: ${fuzzers}"
 echo "# RESULTS ROOT: ${RESULTS_ROOT}"
 echo
 
+project_index=0
 for fuzzer in $fuzzers; do
     for target in $targets; do
         echo
@@ -201,13 +245,21 @@ for fuzzer in $fuzzers; do
         echo
 
         if [[ "$fuzzer" == "voltron" ]]; then
-            run_voltron_target "$target" &
+            run_voltron_target "$target" "$project_index" &
         else
             run_standard_target "$target" "$fuzzer" &
         fi
         job_pids+=("$!")
+        project_index=$((project_index + 1))
     done
 done
+
+if [[ "$CENTRAL_VOLTRON_MONITOR" == "1" ]]; then
+    profuzzbench_monitor_containers \
+        "voltron experiment ${PROFUZZBENCH_RUN_ID}" \
+        "$TIMEOUT" &
+    CENTRAL_MONITOR_PID=$!
+fi
 
 EXECUTION_STATUS=0
 for job_pid in "${job_pids[@]}"; do
@@ -215,5 +267,12 @@ for job_pid in "${job_pids[@]}"; do
         EXECUTION_STATUS=1
     fi
 done
+
+if [[ "$CENTRAL_VOLTRON_MONITOR" == "1" ]]; then
+    profuzzbench_stop_monitor "$CENTRAL_MONITOR_PID"
+    profuzzbench_print_final_container_summary \
+        "voltron experiment ${PROFUZZBENCH_RUN_ID}" \
+        "$TIMEOUT"
+fi
 
 exit "$EXECUTION_STATUS"

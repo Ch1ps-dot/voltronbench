@@ -10,14 +10,14 @@ gateway:
   rate_limit_cooldown_seconds: 5
   failure_threshold: 3
   circuit_cooldown_seconds: 30
-  default_max_concurrency: 1
+  default_max_concurrency: 8
 
 profiles:
   - name: api-1
     base_url: https://api.example.com/v1
     api_key: sk-key-1
     model: example-model
-    max_concurrency: 6
+    max_concurrency: 8
     enabled: true
 
   - name: api-2

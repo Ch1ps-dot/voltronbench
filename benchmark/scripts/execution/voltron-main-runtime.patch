@@ -1,0 +1,73 @@
+--- a/voltron/synthesizer/synthesizer.py
++++ b/voltron/synthesizer/synthesizer.py
+@@ -469 +469,3 @@
+-            while(True):
++            retry_limit = max(1, getattr(configs, 'generation_retry_limit', 3))
++            failure_count = 0
++            while failure_count < retry_limit:
+@@ -509,2 +511,9 @@
+-                except Exception:
+-                    logger.exception('Producer: mutator generation failed')
++                except Exception:
++                    failure_count += 1
++                    logger.exception('Producer: mutator generation failed')
++            logger.error(
++                'Producer: giving up mutator generation for %s after %d attempts',
++                msg_type,
++                retry_limit,
++            )
++            return None
+@@ -583 +592,4 @@
+-        for msg_type, mutate_code in results:
++        for result in results:
++            if result is None:
++                continue
++            msg_type, mutate_code = result
+@@ -670 +670,3 @@
+-            while True:
++            retry_limit = max(1, getattr(configs, 'generation_retry_limit', 3))
++            failure_count = 0
++            while failure_count < retry_limit:
+@@ -691,5 +693,8 @@
+-                except Exception as e:
+-                    logger.debug(
+-                        f'[Checker Generation][{response_type}]: '
+-                        f'invalid checker {e}'
+-                    )
++                except Exception as e:
++                    failure_count += 1
++                    logger.debug(
++                        f'[Checker Generation][{response_type}]: '
++                        f'invalid checker {e}'
++                    )
++            logger.error('Producer: giving up checker generation for %s after %d attempts', response_type, retry_limit)
++            return None
+@@ -731 +736,4 @@
+-        for msg_type, checker_code in results:
++        for result in results:
++            if result is None:
++                continue
++            msg_type, checker_code = result
+@@ -765 +773,3 @@
+-            while True:
++            retry_limit = max(1, getattr(configs, 'generation_retry_limit', 3))
++            failure_count = 0
++            while failure_count < retry_limit:
+@@ -792,4 +802,7 @@
+-                except Exception:
+-                    logger.exception(
+-                        f'Producer: invalid observer [{response_type}]'
+-                    )
++                except Exception:
++                    failure_count += 1
++                    logger.exception(
++                        f'Producer: invalid observer [{response_type}]'
++                    )
++            logger.error('Producer: giving up observer generation for %s after %d attempts', response_type, retry_limit)
++            return None
+@@ -821 +834,4 @@
+-        for msg_type, observer_code in results:
++        for result in results:
++            if result is None:
++                continue
++            msg_type, observer_code = result

@@ -144,6 +144,13 @@ class VoltronCoverageExportTests(unittest.TestCase):
             "/bin/bash /opt/voltron-coverage.sh",
             container_runner,
         )
+        self.assertIn('set_stage "PACKAGING 3/4: creating archive"', container_runner)
+        self.assertIn('set_stage "ARCHIVE READY 4/4"', container_runner)
+        self.assertIn("Collecting archives", host_runner)
+        self.assertLess(
+            host_runner.index("collect_results\nprofuzzbench_stop_monitor"),
+            host_runner.index('printf "\\nVOLTRON: I am done!\\n"'),
+        )
         self.assertNotIn(
             "without inventing coverage measurements",
             container_runner,

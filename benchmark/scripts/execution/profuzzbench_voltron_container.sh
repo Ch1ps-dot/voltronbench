@@ -10,7 +10,7 @@ SKIPCOUNT=${4:-1}
 VOLTRON_SOURCE=${VOLTRON_SOURCE:-/opt/voltron-src}
 VOLTRON_DIR=${VOLTRON_DIR:-/home/ubuntu/voltron-runtime}
 STATS_INTERVAL=${VOLTRON_STATS_INTERVAL:-10}
-COMPLIANCE_ANALYZER=${VOLTRON_COMPLIANCE_ANALYZER:-analyze_compliance}
+COMPLIANCE_ANALYZER=${VOLTRON_COMPLIANCE_ANALYZER:-analyze_compliance.py}
 TIMEOUT_MINUTES=$(( (TIMEOUT_SECONDS + 59) / 60 ))
 
 case "$TARGET" in
@@ -23,6 +23,47 @@ rm -rf "$VOLTRON_DIR"
 mkdir -p "$VOLTRON_DIR"
 cp -a "$VOLTRON_SOURCE/." "$VOLTRON_DIR/"
 cd "$VOLTRON_DIR"
+
+apply_subject_overrides() {
+  local source_dir="/opt/voltron-subject-overrides/${TARGET}"
+  local destination_dir="config/subjects/${VOLTRON_TARGET}"
+  local source_file
+
+  [ -d "$source_dir" ] || return 0
+  [ -d "$destination_dir" ] || {
+    printf 'VOLTRON: missing subject directory for override: %s\n' \
+      "$destination_dir" >&2
+    return 1
+  }
+
+  for source_file in "$source_dir"/*.sh; do
+    [ -e "$source_file" ] || continue
+    install -m 0755 "$source_file" "$destination_dir/${source_file##*/}"
+  done
+}
+
+apply_subject_overrides
+
+apply_main_runtime_patch() {
+  local patch_file=/opt/voltron-main-runtime.patch
+
+  [ -r "$patch_file" ] || return 0
+  if grep -Fq 'giving up mutator generation for %s after %d attempts' \
+    voltron/synthesizer/synthesizer.py \
+    && grep -Fq 'giving up checker generation for %s after %d attempts' \
+      voltron/synthesizer/synthesizer.py \
+    && grep -Fq 'giving up observer generation for %s after %d attempts' \
+      voltron/synthesizer/synthesizer.py; then
+    printf 'VOLTRON: main-snapshot runtime patch is already present\n'
+    return 0
+  fi
+  if ! patch --batch --forward -p1 < "$patch_file"; then
+    printf 'VOLTRON: main-snapshot runtime patch did not apply\n' >&2
+    return 1
+  fi
+}
+
+apply_main_runtime_patch
 
 replace_llm_setting() {
   local field=$1
@@ -46,9 +87,14 @@ mkdir -p "$OUTDIR"
 uv sync --locked
 
 PLOT_DATA="$OUTDIR/plot_data"
+STAGE_FILE="$OUTDIR/.profuzzbench-stage"
 cat > "$PLOT_DATA" <<'EOF'
 # unix_time, cycles_done, cur_path, paths_total, pending_total, pending_favs, map_size, unique_crashes, unique_hangs, max_depth, execs_per_sec, n_nodes, n_edges, chat_times
 EOF
+
+set_stage() {
+  printf '%s\n' "$1" > "$STAGE_FILE"
+}
 
 record_status() {
   local status_file="$OUTDIR/fuzzer_status"
@@ -71,17 +117,25 @@ record_status() {
 run_compliance_analysis() {
   local log_file="$OUTDIR/analyze_compliance.log"
 
+  set_stage "FINALIZING 1/4: compliance analysis"
   printf 'Running compliance analysis for %s with %s\n' \
     "$VOLTRON_TARGET" "$COMPLIANCE_ANALYZER" | tee "$log_file"
 
-  uv run "$COMPLIANCE_ANALYZER" \
-    --sut "$VOLTRON_TARGET" \
-    --output "$OUTDIR" >> "$log_file" 2>&1
+  if [ -f "$COMPLIANCE_ANALYZER" ]; then
+    uv run python "$COMPLIANCE_ANALYZER" \
+      --sut "$VOLTRON_TARGET" \
+      --output "$OUTDIR" >> "$log_file" 2>&1
+  else
+    uv run "$COMPLIANCE_ANALYZER" \
+      --sut "$VOLTRON_TARGET" \
+      --output "$OUTDIR" >> "$log_file" 2>&1
+  fi
 }
 
 run_code_coverage() {
   local result_dir
 
+  set_stage "FINALIZING 2/4: coverage export"
   result_dir=$(realpath "$OUTDIR")
   printf 'Exporting Voltron test cases for AFLNet coverage replay\n'
   uv run python /opt/voltron-export-aflnet-replay.py \
@@ -90,6 +144,7 @@ run_code_coverage() {
     "$TARGET" "$result_dir" "$SKIPCOUNT"
 }
 
+set_stage "FUZZING 0/4"
 uv run cli.py \
   --sut "$VOLTRON_TARGET" \
   --algorithm state \
@@ -116,7 +171,9 @@ COMPLIANCE_STATUS=$?
 run_code_coverage
 COVERAGE_STATUS=$?
 
+set_stage "PACKAGING 3/4: creating archive"
 tar -zcf "${OUTDIR}.tar.gz" "$OUTDIR"
+set_stage "ARCHIVE READY 4/4"
 if [ "$STATUS" -ne 0 ]; then
   exit "$STATUS"
 fi

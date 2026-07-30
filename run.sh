@@ -477,6 +477,10 @@ echo
 echo "Experiment run ID: $RUN_ID"
 echo "Raw results directory: $RUN_ROOT"
 
+PROFUZZBENCH_RUN_START_EPOCH=$(date +%s)
+export PROFUZZBENCH_RUN_ID="$RUN_ID"
+export PROFUZZBENCH_RUN_START_EPOCH
+
 cd "$PFBENCH"
 
 PFBENCH=$PFBENCH \
