@@ -124,10 +124,12 @@ run_compliance_analysis() {
   if [ -f "$COMPLIANCE_ANALYZER" ]; then
     uv run python "$COMPLIANCE_ANALYZER" \
       --sut "$VOLTRON_TARGET" \
+      --input "$OUTDIR" \
       --output "$OUTDIR" >> "$log_file" 2>&1
   else
     uv run "$COMPLIANCE_ANALYZER" \
       --sut "$VOLTRON_TARGET" \
+      --input "$OUTDIR" \
       --output "$OUTDIR" >> "$log_file" 2>&1
   fi
 }
@@ -138,7 +140,8 @@ run_code_coverage() {
   set_stage "FINALIZING 2/4: coverage export"
   result_dir=$(realpath "$OUTDIR")
   printf 'Exporting Voltron test cases for AFLNet coverage replay\n'
-  uv run python /opt/voltron-export-aflnet-replay.py \
+  PYTHONPATH="$VOLTRON_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+    uv run python /opt/voltron-export-aflnet-replay.py \
     --result-dir "$result_dir" || return
   /bin/bash /opt/voltron-coverage.sh \
     "$TARGET" "$result_dir" "$SKIPCOUNT"

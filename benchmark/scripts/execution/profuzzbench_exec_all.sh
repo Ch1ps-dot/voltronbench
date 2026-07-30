@@ -145,7 +145,7 @@ run_voltron_target() {
     mkdir -p "$RESULTS_ROOT/$result_dir"
     launcher_log="$RESULTS_ROOT/$result_dir/voltron-launcher.log"
     if [[ "${PROFUZZBENCH_EXTERNAL_MONITOR:-0}" == "1" ]]; then
-        PROFUZZBENCH_PROJECT_INDEX="$project_index" \
+        exec env PROFUZZBENCH_PROJECT_INDEX="$project_index" \
             "$PFBENCH/../run_voltron.sh" \
             "${target}-vol" \
             "$NUM_CONTAINERS" \
@@ -155,7 +155,7 @@ run_voltron_target() {
             "$TIMEOUT" \
             "$SKIPCOUNT" > "$launcher_log" 2>&1
     else
-        PROFUZZBENCH_PROJECT_INDEX="$project_index" \
+        exec env PROFUZZBENCH_PROJECT_INDEX="$project_index" \
             "$PFBENCH/../run_voltron.sh" \
             "${target}-vol" \
             "$NUM_CONTAINERS" \
@@ -225,6 +225,35 @@ if [[ "$PROFUZZBENCH_MONITOR" != "0" \
     CENTRAL_VOLTRON_MONITOR=1
 fi
 
+handle_execution_interrupt() {
+    local job_pid
+
+    trap - INT TERM
+    echo
+    echo "ProFuzzBench: interrupt received; stopping launchers and monitor."
+    if [[ -n "$CENTRAL_MONITOR_PID" ]]; then
+        profuzzbench_stop_monitor "$CENTRAL_MONITOR_PID"
+        CENTRAL_MONITOR_PID=
+    fi
+    for job_pid in "${job_pids[@]}"; do
+        if kill -0 "$job_pid" 2>/dev/null; then
+            kill -TERM "$job_pid" 2>/dev/null || true
+        fi
+    done
+    for job_pid in "${job_pids[@]}"; do
+        wait "$job_pid" 2>/dev/null || true
+    done
+    if [[ "$CENTRAL_VOLTRON_MONITOR" == "1" ]]; then
+        profuzzbench_print_final_container_summary \
+            "voltron experiment ${PROFUZZBENCH_RUN_ID}" \
+            "$TIMEOUT"
+    fi
+    echo "ProFuzzBench: interrupted; exiting with status 130."
+    exit 130
+}
+
+trap handle_execution_interrupt INT TERM
+
 echo
 echo "# NUM_CONTAINERS: ${NUM_CONTAINERS}"
 echo "# TIMEOUT: ${TIMEOUT} s"
@@ -275,4 +304,5 @@ if [[ "$CENTRAL_VOLTRON_MONITOR" == "1" ]]; then
         "$TIMEOUT"
 fi
 
+trap - INT TERM
 exit "$EXECUTION_STATUS"

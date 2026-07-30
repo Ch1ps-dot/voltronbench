@@ -44,6 +44,7 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
         self.assertIn("apply_subject_overrides", container_runner)
         self.assertIn("apply_main_runtime_patch", container_runner)
         self.assertIn("COMPLIANCE_ANALYZER:-analyze_compliance.py", container_runner)
+        self.assertIn('--input "$OUTDIR"', container_runner)
         self.assertIn("generation_retry_limit", runtime_patch)
         self.assertIn("giving up mutator generation", runtime_patch)
         self.assertIn("giving up checker generation", runtime_patch)

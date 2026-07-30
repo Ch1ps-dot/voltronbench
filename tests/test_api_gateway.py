@@ -143,6 +143,14 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
+    class FailingReadStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            raise httpx.ReadError("SSL record layer failure")
+            yield b""
+
+        async def aclose(self) -> None:
+            return None
+
     async def test_chatafl_chat_completion_payload_is_compatible(
         self,
     ) -> None:
@@ -306,6 +314,79 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(headers["content-type"], "text/event-stream")
         self.assertIn(b'"content":"OK"', body)
+
+    async def test_non_streaming_read_error_fails_over_before_response_start(
+        self,
+    ) -> None:
+        keys = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            key = request.headers["authorization"].removeprefix("Bearer ")
+            keys.append(key)
+            if key == "key-1":
+                return httpx.Response(
+                    200,
+                    stream=self.FailingReadStream(),
+                )
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "recovered"}}]},
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        app = GatewayApplication(
+            GatewaySettings(access_token="test-token", max_attempts=2),
+            profiles(),
+            client=client,
+        )
+        status, _headers, body = await call_asgi(
+            app,
+            payload={
+                "model": "logical",
+                "messages": [],
+                "stream": False,
+            },
+        )
+        snapshot = await app.scheduler.snapshot()
+        await client.aclose()
+
+        self.assertEqual(status, 200)
+        self.assertIn(b"recovered", body)
+        self.assertEqual(keys, ["key-1", "key-2"])
+        self.assertEqual(snapshot["profiles"][0]["failures"], 1)
+        self.assertEqual(snapshot["profiles"][1]["successes"], 1)
+
+    async def test_streaming_read_error_finishes_asgi_response_cleanly(
+        self,
+    ) -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                stream=self.FailingReadStream(),
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        app = GatewayApplication(
+            GatewaySettings(access_token="test-token", max_attempts=1),
+            [profiles()[0]],
+            client=client,
+        )
+        status, headers, body = await call_asgi(
+            app,
+            payload={
+                "model": "logical",
+                "messages": [],
+                "stream": True,
+            },
+        )
+        snapshot = await app.scheduler.snapshot()
+        await client.aclose()
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/event-stream")
+        self.assertEqual(body, b"")
+        self.assertEqual(snapshot["profiles"][0]["failures"], 1)
 
     async def test_status_requires_token_and_contains_no_key(self) -> None:
         client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: None))

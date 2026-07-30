@@ -44,7 +44,7 @@ def _write_aflnet_case(path: Path, requests: list[bytes]) -> None:
             stream.write(request)
 
 
-def export_cases(result_dir: Path) -> tuple[int, int]:
+def export_cases(result_dir: Path) -> tuple[int, int, int]:
     source_dir = result_dir / "replayable_testcases"
     output_dir = result_dir / "replayable-queue"
     manifest_path = result_dir / "voltron_aflnet_replay_manifest.csv"
@@ -97,7 +97,7 @@ def export_cases(result_dir: Path) -> tuple[int, int]:
             )
             exported += 1
 
-    return exported, skipped
+    return exported, skipped, len(candidates)
 
 
 def main() -> int:
@@ -112,13 +112,19 @@ def main() -> int:
     result_dir = args.result_dir.expanduser().resolve()
     result_dir.mkdir(parents=True, exist_ok=True)
 
-    exported, skipped = export_cases(result_dir)
+    exported, skipped, candidates = export_cases(result_dir)
     print(
         "VOLTRON coverage: "
-        f"exported={exported} skipped={skipped} "
+        f"exported={exported} skipped={skipped} candidates={candidates} "
         f"queue={result_dir / 'replayable-queue'}",
         flush=True,
     )
+    if candidates > 0 and exported == 0:
+        print(
+            "VOLTRON coverage: all retained test cases failed to export",
+            flush=True,
+        )
+        return 1
     return 0
 
 

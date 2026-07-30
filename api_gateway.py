@@ -572,6 +572,7 @@ class GatewayApplication:
             )
             started = time.monotonic()
             released = False
+            response_started = False
             response: httpx.Response | None = None
             try:
                 response = await self.client.send(request, stream=True)
@@ -600,6 +601,34 @@ class GatewayApplication:
                     await response.aclose()
                     continue
 
+                if payload.get("stream") is not True:
+                    response_body = await response.aread()
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": status,
+                            "headers": response_headers,
+                        }
+                    )
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": response_body,
+                            "more_body": False,
+                        }
+                    )
+                    outcome = (
+                        "success"
+                        if 200 <= status < 300
+                        else "client_error"
+                    )
+                    await self.scheduler.release(
+                        state, outcome, time.monotonic() - started
+                    )
+                    released = True
+                    await response.aclose()
+                    return
+
                 await send(
                     {
                         "type": "http.response.start",
@@ -607,6 +636,7 @@ class GatewayApplication:
                         "headers": response_headers,
                     }
                 )
+                response_started = True
                 async for chunk in response.aiter_bytes():
                     await send(
                         {
@@ -644,8 +674,36 @@ class GatewayApplication:
                     state, "upstream_failure", time.monotonic() - started
                 )
                 released = True
-                await self._error(send, 504, "upstream request timed out")
+                if response_started:
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": b"",
+                            "more_body": False,
+                        }
+                    )
+                else:
+                    await self._error(send, 504, "upstream request timed out")
                 return
+            except httpx.TransportError:
+                last_status = 502
+                last_body = (
+                    b'{"error":{"message":"failed to read upstream response"}}'
+                )
+                await self.scheduler.release(
+                    state, "upstream_failure", time.monotonic() - started
+                )
+                released = True
+                if response_started:
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": b"",
+                            "more_body": False,
+                        }
+                    )
+                    return
+                continue
             finally:
                 if response is not None and not response.is_closed:
                     await response.aclose()

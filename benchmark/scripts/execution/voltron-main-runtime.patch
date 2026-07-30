@@ -71,3 +71,104 @@
 +            if result is None:
 +                continue
 +            msg_type, observer_code = result
+@@ -441,10 +441,27 @@
+             doc_info: the document information to be used for generator evolution
+             machine: the current MealyMachine which provides the state transition information for generator evolution
+         """
+-        old_code = ''
+-        old_g_name = f'id{machine.id}.py'
+-        old_g_path = self.generator_path / msg_type / old_g_name
+-        with open(old_g_path, 'r', encoding='utf-8') as f:
++        generator_versions = self.generators.get(msg_type, [])
++        if not generator_versions:
++            logger.error(
++                'Producer: skipping generator evolution for %s: '
++                'no generated baseline exists',
++                msg_type,
++            )
++            return None
++
++        old_generator = generator_versions[-1]
++        old_g_name = old_generator.name
++        old_g_path = Path(old_generator.path)
++        if not old_g_path.is_file():
++            logger.error(
++                'Producer: skipping generator evolution for %s: '
++                'baseline is missing at %s',
++                msg_type,
++                old_g_path,
++            )
++            return None
++        with old_g_path.open('r', encoding='utf-8') as f:
+             old_code = f.read()
+             
+         # extract state trace of request pair which has dependency and the code of related generators 
+@@ -463,7 +480,10 @@
+         #         trace_list.add(machine.get_relation(last_request, current_request))
+                 
+         async with sem:
+-            while(True):
++            retry_limit = max(1, getattr(configs, 'generation_retry_limit', 3))
++            failure_count = 0
++            ir_evolution_attempted = False
++            while failure_count < retry_limit:
+                 try:
+                     # generate input generator and save it
+                     input_code = await self.chater.llm_generator_evolve(
+@@ -494,7 +514,7 @@
+                         configs,
+                         'ir_evolution_failure_threshold',
+                         3,
+-                    ):
++                    ) and not ir_evolution_attempted:
+                         await self._maybe_evolve_request_ir(
+                             msg_type,
+                             (
+@@ -502,8 +522,14 @@
+                                 f'time(s): {type(e).__name__}: {e}'
+                             ),
+                         )
+-                        failure_count = 0
++                        ir_evolution_attempted = True
+                     logger.debug(f'Producer: generate error {e}')
++            logger.error(
++                'Producer: giving up generator evolution for %s after %d attempts',
++                msg_type,
++                retry_limit,
++            )
++            return None
+ 
+     async def _generator_evo_async(
+         self,
+@@ -537,7 +563,10 @@
+         
+         # produce new generator
+         results = asyncio.run(self._generator_evo_async(doc_info, machine))
+-        for msg_type, input_code in results:
++        for result in results:
++            if result is None:
++                continue
++            msg_type, input_code = result
+             msg_dir = self.generator_path / f'{msg_type}'
+             if not msg_dir.is_dir():
+                 msg_dir.mkdir()
+@@ -549,7 +578,7 @@
+                 f.write(input_code)
+                 # construct and save information for new generator
+                 
+-                old_name = f'id{machine.id}'
++                old_name = self.generators[msg_type][-1].name
+                 new_name = f'id{cur_id}'
+                 info: dict = {'msg_type': msg_type, 'evolved_from': old_name, 'name': new_name, 'path': str(gen_path.resolve())}
+                 self.generators.setdefault(msg_type, [])
+--- a/component/ir/rtsp/req_ir.xml
++++ b/component/ir/rtsp/req_ir.xml
+@@ -53,7 +53,7 @@
+   <field name="OptionalHeaders" type="variable" length="undefined" value="Zero or more RTSP header lines: Media-Properties, Media-Range, Scale, RTP-Info (all conditional); Date, Server, Timestamp, Via etc."/>
+   <!-- May include Media-Properties (to indicate new properties), Media-Range -->
+ </message>
+-  <message name="PLAY_NOTIFY_scale-change">
++  <message name="PLAY_NOTIFY (scale-change)">
+     <!-- Server-to-client notification that the playback scale has been changed due to media constraints.
+          This is a request with method PLAY_NOTIFY and Notify-Reason header set to scale-change. -->
+     

@@ -17,24 +17,52 @@ source "$ROOT/benchmark/scripts/execution/profuzzbench_monitor_common.sh"
 cids=()
 MONITOR_PID=""
 MONITOR_PROGRESS_FILE=""
+WAIT_PID=""
+WAIT_STATUS_FILE=""
 LABEL="voltron on ${DOCIMAGE}"
 PROFUZZBENCH_RUN_START_EPOCH=${PROFUZZBENCH_RUN_START_EPOCH:-$(date +%s)}
 PROFUZZBENCH_EXTERNAL_MONITOR=${PROFUZZBENCH_EXTERNAL_MONITOR:-0}
 mkdir -p "$SAVETO"
 
+copy_container_result() {
+  local id=$1
+  local destination=$2
+  local partial_root
+
+  if docker cp \
+    "${id}:/home/ubuntu/voltron-runtime/${OUTDIR}.tar.gz" \
+    "$destination" > /dev/null 2>&1; then
+    return 0
+  fi
+
+  partial_root=$(mktemp -d "$SAVETO/.voltron-partial.XXXXXX") || return 1
+  if docker cp \
+      "${id}:/home/ubuntu/voltron-runtime/${OUTDIR}" \
+      "$partial_root/" > /dev/null 2>&1 \
+    && tar -zcf "$destination" -C "$partial_root" "$OUTDIR"; then
+    printf "\nVOLTRON: Saved partial result directory from container %s" "$id"
+    rm -rf -- "$partial_root"
+    return 0
+  fi
+
+  rm -rf -- "$partial_root"
+  return 1
+}
+
 collect_results() {
   local index=1
   local id
   local copied=0
+  local status=0
 
   printf "\nVOLTRON: Collecting results and saving them to %s" "$SAVETO"
   for id in "${cids[@]}"; do
     write_monitor_progress "Collecting archives $((index - 1))/${#cids[@]}"
     printf "\nVOLTRON: Collecting results from container %s" "$id"
-    if ! docker cp \
-      "${id}:/home/ubuntu/voltron-runtime/${OUTDIR}.tar.gz" \
-      "${SAVETO}/${OUTDIR}_${index}.tar.gz" > /dev/null 2>&1; then
-      printf "\nVOLTRON: No archive available from container %s" "$id"
+    if ! copy_container_result \
+      "$id" "${SAVETO}/${OUTDIR}_${index}.tar.gz"; then
+      printf "\nVOLTRON: No result directory available from container %s" "$id"
+      status=1
     else
       copied=$((copied + 1))
     fi
@@ -44,6 +72,7 @@ collect_results() {
     index=$((index + 1))
   done
   write_monitor_progress "Archive collection complete: ${copied}/${#cids[@]}"
+  return "$status"
 }
 
 write_monitor_progress() {
@@ -59,10 +88,26 @@ remove_monitor_progress_file() {
   fi
 }
 
+stop_container_waiter() {
+  if [ -n "$WAIT_PID" ]; then
+    kill "$WAIT_PID" 2>/dev/null || true
+    wait "$WAIT_PID" 2>/dev/null || true
+    WAIT_PID=""
+  fi
+}
+
+remove_wait_status_file() {
+  if [ -n "$WAIT_STATUS_FILE" ]; then
+    rm -f -- "$WAIT_STATUS_FILE"
+    WAIT_STATUS_FILE=""
+  fi
+}
+
 handle_interrupt() {
   trap - INT TERM
   printf "\nVOLTRON: Interrupt received. Cleaning up...\n"
   write_monitor_progress "Interrupted; stopping containers"
+  stop_container_waiter
   profuzzbench_stop_monitor "$MONITOR_PID"
   profuzzbench_interrupt_containers "${cids[@]}"
   if [ "$PROFUZZBENCH_EXTERNAL_MONITOR" != "1" ]; then
@@ -70,8 +115,9 @@ handle_interrupt() {
       "$LABEL" "$TIMEOUT" "${cids[@]}"
   fi
   if [ "$PROFUZZBENCH_COLLECT_ON_INTERRUPT" = "1" ]; then
-    collect_results
+    collect_results || true
   fi
+  remove_wait_status_file
   remove_monitor_progress_file
   printf "\nVOLTRON: Interrupted. Exiting with status 130.\n"
   exit 130
@@ -242,13 +288,47 @@ if [ "$PROFUZZBENCH_MONITOR" != "0" ] \
   profuzzbench_monitor_containers "$LABEL" "$TIMEOUT" "${cids[@]}" &
   MONITOR_PID=$!
 fi
-docker wait "${cids[@]}" > /dev/null
+CONTAINER_STATUS=0
+WAIT_STATUS_FILE=$(mktemp "$SAVETO/.voltron-wait-status.XXXXXX")
+docker wait "${cids[@]}" > "$WAIT_STATUS_FILE" &
+WAIT_PID=$!
+if ! wait "$WAIT_PID"; then
+  printf "\nVOLTRON: Failed while waiting for containers"
+  CONTAINER_STATUS=1
+fi
+WAIT_PID=""
+
+index=0
+while IFS= read -r exit_code; do
+  if [ "$index" -ge "${#cids[@]}" ]; then
+    break
+  fi
+  if [ "$exit_code" != "0" ]; then
+    printf "\nVOLTRON: Container %s exited with status %s" \
+      "${cids[$index]}" "$exit_code"
+    CONTAINER_STATUS=1
+  fi
+  index=$((index + 1))
+done < "$WAIT_STATUS_FILE"
+if [ "$index" -ne "${#cids[@]}" ]; then
+  printf "\nVOLTRON: Missing exit status for one or more containers"
+  CONTAINER_STATUS=1
+fi
+remove_wait_status_file
+
 write_monitor_progress "Fuzzing finished; preparing archive collection"
-collect_results
+if ! collect_results; then
+  CONTAINER_STATUS=1
+fi
 profuzzbench_stop_monitor "$MONITOR_PID"
 if [ "$PROFUZZBENCH_EXTERNAL_MONITOR" != "1" ]; then
   profuzzbench_print_final_container_summary "$LABEL" "$TIMEOUT" "${cids[@]}"
 fi
 remove_monitor_progress_file
+
+if [ "$CONTAINER_STATUS" -ne 0 ]; then
+  printf "\nVOLTRON: Completed with failed container(s).\n"
+  exit "$CONTAINER_STATUS"
+fi
 
 printf "\nVOLTRON: I am done!\n"

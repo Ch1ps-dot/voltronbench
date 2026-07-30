@@ -87,7 +87,10 @@ class VoltronCoverageExportTests(unittest.TestCase):
             )
 
             self.assertEqual(completed.returncode, 0, completed.stderr)
-            self.assertIn("exported=2 skipped=1", completed.stdout)
+            self.assertIn(
+                "exported=2 skipped=1 candidates=3",
+                completed.stdout,
+            )
             queue = result_dir / "replayable-queue"
             first = queue / "id:000000,src:voltron"
             second = queue / "id:000001,src:voltron"
@@ -137,6 +140,10 @@ class VoltronCoverageExportTests(unittest.TestCase):
             host_runner,
         )
         self.assertIn(
+            'PYTHONPATH="$VOLTRON_DIR${PYTHONPATH:+:$PYTHONPATH}"',
+            container_runner,
+        )
+        self.assertIn(
             "uv run python /opt/voltron-export-aflnet-replay.py",
             container_runner,
         )
@@ -148,13 +155,106 @@ class VoltronCoverageExportTests(unittest.TestCase):
         self.assertIn('set_stage "ARCHIVE READY 4/4"', container_runner)
         self.assertIn("Collecting archives", host_runner)
         self.assertLess(
-            host_runner.index("collect_results\nprofuzzbench_stop_monitor"),
+            host_runner.index("if ! collect_results; then"),
             host_runner.index('printf "\\nVOLTRON: I am done!\\n"'),
         )
         self.assertNotIn(
             "without inventing coverage measurements",
             container_runner,
         )
+
+    def test_exporter_fails_when_all_retained_cases_are_unreadable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result_dir = Path(temporary) / "results"
+            source_dir = result_dir / "replayable_testcases"
+            source_dir.mkdir(parents=True)
+            (source_dir / "cons_000000.pkl").write_bytes(b"not a pickle")
+
+            completed = subprocess.run(
+                [
+                    "python3",
+                    str(EXPORTER),
+                    "--result-dir",
+                    str(result_dir),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("exported=0 skipped=1 candidates=1", completed.stdout)
+            self.assertIn(
+                "all retained test cases failed to export",
+                completed.stdout,
+            )
+
+    def test_exporter_imports_pickled_voltron_class_from_pythonpath(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package_root = root / "runtime"
+            executor_dir = package_root / "voltron" / "executor"
+            executor_dir.mkdir(parents=True)
+            (package_root / "voltron" / "__init__.py").write_text(
+                "",
+                encoding="utf-8",
+            )
+            (executor_dir / "__init__.py").write_text("", encoding="utf-8")
+            (executor_dir / "conversation.py").write_text(
+                """\
+class Conversation:
+    def __init__(self):
+        self.req_seq = ["NOOP"]
+        self.content = [(b"NOOP\\r\\n", b"200 OK\\r\\n")]
+""",
+                encoding="utf-8",
+            )
+
+            result_dir = root / "results"
+            source_dir = result_dir / "replayable_testcases"
+            source_dir.mkdir(parents=True)
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(package_root)
+            create_pickle = subprocess.run(
+                [
+                    "python3",
+                    "-c",
+                    (
+                        "import pickle; "
+                        "from voltron.executor.conversation import Conversation; "
+                        "pickle.dump(Conversation(), open("
+                        f"{str(source_dir / 'cons_000000.pkl')!r}, 'wb'))"
+                    ),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(create_pickle.returncode, 0, create_pickle.stderr)
+
+            completed = subprocess.run(
+                [
+                    "python3",
+                    str(EXPORTER),
+                    "--result-dir",
+                    str(result_dir),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("exported=1 skipped=0 candidates=1", completed.stdout)
+            self.assertEqual(
+                decode_aflnet_case(
+                    result_dir / "replayable-queue" / "id:000000,src:voltron"
+                ),
+                [b"NOOP\r\n"],
+            )
 
     def test_generated_coverage_is_consumed_by_benchmark_analysis(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
