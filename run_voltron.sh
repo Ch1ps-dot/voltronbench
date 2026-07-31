@@ -14,6 +14,14 @@ DELETE=${8:-}
 ROOT=$(cd "$(dirname "$0")" && pwd)
 source "$ROOT/benchmark/scripts/execution/profuzzbench_monitor_common.sh"
 
+MANIFEST_PATH="${PROFUZZBENCH_CONTAINER_MANIFEST:-${RESULTS_ROOT:-$SAVETO/..}/container-manifest.jsonl}"
+MANIFEST_RUN_ID="${PROFUZZBENCH_RUN_ID:-unknown}"
+
+record_manifest() {
+  python3 "$ROOT/scripts/record_container_manifest.py" "$@" \
+    >/dev/null 2>&1 || true
+}
+
 cids=()
 MONITOR_PID=""
 MONITOR_PROGRESS_FILE=""
@@ -65,6 +73,13 @@ collect_results() {
       status=1
     else
       copied=$((copied + 1))
+      record_manifest \
+        --manifest "$MANIFEST_PATH" --event archived \
+        --run-id "$MANIFEST_RUN_ID" --target "$TARGET" \
+        --fuzzer voltron --replication "$index" --container-id "$id" \
+        --result-dir "$SAVETO" \
+        --archive-path "${SAVETO}/${OUTDIR}_${index}.tar.gz" \
+        --timeout-seconds "$TIMEOUT"
     fi
     if [ -n "$DELETE" ]; then
       docker rm "$id" > /dev/null 2>&1 || true
@@ -233,6 +248,7 @@ for i in $(seq 1 "$RUNS"); do
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_voltron_container.sh,dst=/opt/voltron-benchmark-runner.sh,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-subject-overrides,dst=/opt/voltron-subject-overrides,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-main-runtime.patch,dst=/opt/voltron-main-runtime.patch,readonly"
+    --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-generator-evolution-runtime.patch,dst=/opt/voltron-generator-evolution-runtime.patch,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_export_voltron_replay.py,dst=/opt/voltron-export-aflnet-replay.py,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_voltron_coverage.sh,dst=/opt/voltron-coverage.sh,readonly"
     --mount "type=bind,src=${TARGET_COVERAGE_SCRIPT},dst=/opt/voltron-target-cov-script.sh,readonly"
@@ -275,6 +291,11 @@ for i in $(seq 1 "$RUNS"); do
   id=$(docker "${docker_args[@]}" "$DOCIMAGE" /bin/bash \
     /opt/voltron-benchmark-runner.sh "$TARGET" "$OUTDIR" "$TIMEOUT" "$SKIPCOUNT")
   cids+=("${id::12}")
+  record_manifest \
+    --manifest "$MANIFEST_PATH" --event started \
+    --run-id "$MANIFEST_RUN_ID" --target "$TARGET" \
+    --fuzzer voltron --replication "$i" --container-id "${id::12}" \
+    --result-dir "$SAVETO" --timeout-seconds "$TIMEOUT"
 done
 
 printf "\nVOLTRON: Fuzzing in progress ..."
@@ -308,6 +329,12 @@ while IFS= read -r exit_code; do
       "${cids[$index]}" "$exit_code"
     CONTAINER_STATUS=1
   fi
+  record_manifest \
+    --manifest "$MANIFEST_PATH" --event finished \
+    --run-id "$MANIFEST_RUN_ID" --target "$TARGET" \
+    --fuzzer voltron --replication "$((index + 1))" \
+    --container-id "${cids[$index]}" --result-dir "$SAVETO" \
+    --exit-code "$exit_code" --timeout-seconds "$TIMEOUT"
   index=$((index + 1))
 done < "$WAIT_STATUS_FILE"
 if [ "$index" -ne "${#cids[@]}" ]; then

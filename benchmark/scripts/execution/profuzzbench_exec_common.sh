@@ -16,6 +16,17 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
 source "$SCRIPT_DIR/profuzzbench_monitor_common.sh"
 
+MANIFEST_PATH="${PROFUZZBENCH_CONTAINER_MANIFEST:-${RESULTS_ROOT:-$SAVETO/..}/container-manifest.jsonl}"
+MANIFEST_RUN_ID="${PROFUZZBENCH_RUN_ID:-unknown}"
+MANIFEST_TARGET="${DOCIMAGE##*/}"
+MANIFEST_TARGET="${MANIFEST_TARGET%-stateafl-vol}"
+MANIFEST_TARGET="${MANIFEST_TARGET%-vol}"
+
+record_manifest() {
+  python3 "$PROJECT_ROOT/scripts/record_container_manifest.py" "$@" \
+    >/dev/null 2>&1 || true
+}
+
 #keep all container ids
 cids=()
 MONITOR_PID=""
@@ -153,6 +164,14 @@ collect_results() {
     if ! docker cp "${id}:/home/ubuntu/experiments/${OUTDIR}.tar.gz" "${SAVETO}/${OUTDIR}_${index}.tar.gz" > /dev/null 2>&1; then
       printf "\n${FUZZER^^}: No archive available from container ${id}"
       status=1
+    else
+      record_manifest \
+        --manifest "$MANIFEST_PATH" --event archived \
+        --run-id "$MANIFEST_RUN_ID" --target "$MANIFEST_TARGET" \
+        --fuzzer "$FUZZER" --replication "$index" --container-id "$id" \
+        --result-dir "$SAVETO" \
+        --archive-path "${SAVETO}/${OUTDIR}_${index}.tar.gz" \
+        --timeout-seconds "$TIMEOUT"
     fi
     if [ -n "$DELETE" ]; then
       printf "\nDeleting ${id}"
@@ -200,6 +219,11 @@ for i in $(seq 1 $RUNS); do
   id=$(docker "${docker_args[@]}" "$DOCIMAGE" /bin/bash -c \
     "cd ${WORKDIR} && run ${FUZZER} ${OUTDIR} '${OPTIONS}' ${TIMEOUT} ${SKIPCOUNT}")
   cids+=("${id::12}") #store only the first 12 characters of a container ID
+  record_manifest \
+    --manifest "$MANIFEST_PATH" --event started \
+    --run-id "$MANIFEST_RUN_ID" --target "$MANIFEST_TARGET" \
+    --fuzzer "$FUZZER" --replication "$i" --container-id "${id::12}" \
+    --result-dir "$SAVETO" --timeout-seconds "$TIMEOUT"
 done
 
 dlist="" #docker list
@@ -215,6 +239,7 @@ if [ "$PROFUZZBENCH_MONITOR" != "0" ]; then
   MONITOR_PID=$!
 fi
 CONTAINER_STATUS=0
+replication=1
 for id in "${cids[@]}"; do
   if ! exit_code=$(docker wait "$id"); then
     printf "\n${FUZZER^^}: Failed to wait for container ${id}"
@@ -223,6 +248,17 @@ for id in "${cids[@]}"; do
     printf "\n${FUZZER^^}: Container ${id} exited with status ${exit_code}"
     CONTAINER_STATUS=1
   fi
+  manifest_finished_args=(
+    --manifest "$MANIFEST_PATH" --event finished
+    --run-id "$MANIFEST_RUN_ID" --target "$MANIFEST_TARGET"
+    --fuzzer "$FUZZER" --replication "$replication" --container-id "$id"
+    --result-dir "$SAVETO" --timeout-seconds "$TIMEOUT"
+  )
+  if [[ -n "${exit_code:-}" ]]; then
+    manifest_finished_args+=(--exit-code "$exit_code")
+  fi
+  record_manifest "${manifest_finished_args[@]}"
+  replication=$((replication + 1))
 done
 profuzzbench_stop_monitor "$MONITOR_PID"
 profuzzbench_print_final_container_summary "$LABEL" "$TIMEOUT" "${cids[@]}"

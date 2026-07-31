@@ -38,11 +38,16 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
         runtime_patch = (EXECUTION_DIR / "voltron-main-runtime.patch").read_text(
             encoding="utf-8"
         )
+        generator_patch = (
+            EXECUTION_DIR / "voltron-generator-evolution-runtime.patch"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("voltron-subject-overrides", host_runner)
         self.assertIn("voltron-main-runtime.patch", host_runner)
+        self.assertIn("voltron-generator-evolution-runtime.patch", host_runner)
         self.assertIn("apply_subject_overrides", container_runner)
         self.assertIn("apply_main_runtime_patch", container_runner)
+        self.assertIn("apply_generator_evolution_runtime_patch", container_runner)
         self.assertIn("COMPLIANCE_ANALYZER:-analyze_compliance.py", container_runner)
         self.assertIn('--input "$OUTDIR"', container_runner)
         self.assertIn("generation_retry_limit", runtime_patch)
@@ -50,6 +55,9 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
         self.assertIn("giving up checker generation", runtime_patch)
         self.assertIn("giving up observer generation", runtime_patch)
         self.assertIn("if result is None:", runtime_patch)
+        self.assertIn("giving up generator evolution", generator_patch)
+        self.assertIn("no generated baseline exists", generator_patch)
+        self.assertIn("PLAY_NOTIFY (scale-change)", generator_patch)
         self.assertNotIn("lighttpd", str(list((EXECUTION_DIR / "voltron-subject-overrides").rglob("*"))))
 
 

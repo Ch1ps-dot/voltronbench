@@ -65,6 +65,23 @@ apply_main_runtime_patch() {
 
 apply_main_runtime_patch
 
+apply_generator_evolution_runtime_patch() {
+  local patch_file=/opt/voltron-generator-evolution-runtime.patch
+
+  [ -r "$patch_file" ] || return 0
+  if grep -Fq 'giving up generator evolution for %s after %d attempts' \
+    voltron/synthesizer/synthesizer.py; then
+    printf 'VOLTRON: generator-evolution runtime patch is already present\n'
+    return 0
+  fi
+  if ! patch --batch --forward -p1 < "$patch_file"; then
+    printf 'VOLTRON: generator-evolution runtime patch did not apply\n' >&2
+    return 1
+  fi
+}
+
+apply_generator_evolution_runtime_patch
+
 replace_llm_setting() {
   local field=$1
   local value=$2

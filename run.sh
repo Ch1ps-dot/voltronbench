@@ -6,7 +6,7 @@ PATH=$PATH:$PFBENCH/scripts/execution:$PFBENCH/scripts/analysis
 NUM_CONTAINERS=$1
 DURATION_MINUTES=${2:-1440}
 TIMEOUT=$(( DURATION_MINUTES * 60))
-SKIPCOUNT="${SKIPCOUNT:-1}"
+SKIPCOUNT="${SKIPCOUNT:-5}"
 TEST_TIMEOUT="${TEST_TIMEOUT:-20000}"
 FORKED_DAAPD_STARTUP_WAIT_US="${FORKED_DAAPD_STARTUP_WAIT_US:-1000000}"
 FORKED_DAAPD_MIN_TEST_TIMEOUT_MS="${FORKED_DAAPD_MIN_TEST_TIMEOUT_MS:-3000}"
@@ -353,6 +353,9 @@ if [[ -z "$RUN_ROOT" || ! -d "$RUN_ROOT" ]]; then
 fi
 RUN_ID=$(basename "$RUN_ROOT")
 PARAMETERS_FILE="$RUN_ROOT/experiment_parameters.txt"
+export PROFUZZBENCH_RUN_ID="$RUN_ID"
+export PROFUZZBENCH_RUN_ROOT="$RUN_ROOT"
+export PROFUZZBENCH_CONTAINER_MANIFEST="$RUN_ROOT/container-manifest.jsonl"
 
 metadata_value() {
     local key=$1
@@ -451,6 +454,7 @@ fi
     printf 'forked_daapd_test_timeout_ms_effective=%s\n' \
         "$FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE"
     printf 'raw_results_root=%s\n' "$RUN_ROOT"
+    printf 'container_manifest=%s\n' "$PROFUZZBENCH_CONTAINER_MANIFEST"
     if [[ "$uses_chatafl" == "1" ]]; then
         printf 'chatafl_api_mode=%s\n' "$CHATAFL_API_MODE"
         printf 'chatafl_model=%s\n' "$CHATAFL_MODEL_EFFECTIVE"
