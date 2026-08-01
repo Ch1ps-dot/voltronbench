@@ -44,6 +44,57 @@ static size_t chat_with_llm_helper(void *contents, size_t size, size_t nmemb, vo
     return realsize;
 }
 
+/*
+ * The gateway can return a perfectly valid JSON error object.  Do not let
+ * that object reach callers that expect an OpenAI-compatible completion.  In
+ * particular, json_object_array_get_idx() aborts when its argument is not an
+ * array, which used to turn a transient upstream failure into SIGABRT.
+ */
+static char *parse_llm_response(const char *body, long http_status)
+{
+    json_object *root = NULL;
+    json_object *choices = NULL;
+    json_object *first_choice = NULL;
+    json_object *message = NULL;
+    json_object *content = NULL;
+    const char *content_string;
+    char *answer = NULL;
+
+    if (body == NULL || body[0] == '\0' || http_status < 200 || http_status >= 300)
+        return NULL;
+
+    root = json_tokener_parse(body);
+    if (root == NULL || !json_object_is_type(root, json_type_object))
+        goto done;
+
+    if (!json_object_object_get_ex(root, "choices", &choices) ||
+        !json_object_is_type(choices, json_type_array) ||
+        json_object_array_length(choices) == 0)
+        goto done;
+
+    first_choice = json_object_array_get_idx(choices, 0);
+    if (first_choice == NULL ||
+        !json_object_is_type(first_choice, json_type_object) ||
+        !json_object_object_get_ex(first_choice, "message", &message) ||
+        !json_object_is_type(message, json_type_object) ||
+        !json_object_object_get_ex(message, "content", &content) ||
+        !json_object_is_type(content, json_type_string))
+        goto done;
+
+    content_string = json_object_get_string(content);
+    if (content_string == NULL || content_string[0] == '\0')
+        goto done;
+
+    if (content_string[0] == '\n')
+        content_string++;
+    answer = strdup(content_string);
+
+done:
+    if (root != NULL)
+        json_object_put(root);
+    return answer;
+}
+
 char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
 {
     CURL *curl;
@@ -56,9 +107,11 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
     json_object *model_json = NULL;
     const char *encoded_model = NULL;
 
-    if (configured_api_key == NULL)
+    if (prompt == NULL || model == NULL || tries <= 0 ||
+        configured_model == NULL || url == NULL || configured_api_key == NULL)
     {
-        fprintf(stderr, "Unable to read the configured ChatAFL API key.\n");
+        fprintf(stderr, "ChatAFL LLM request has incomplete configuration.\n");
+        free(configured_api_key);
         return NULL;
     }
     if (asprintf(&auth_header, "Authorization: Bearer %s",
@@ -69,7 +122,7 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
     }
     char *content_header = "Content-Type: application/json";
     char *accept_header = "Accept: application/json";
-    char *data = NULL;
+    char *request_data = NULL;
     model_json = json_object_new_string(configured_model);
     if (model_json == NULL)
     {
@@ -81,20 +134,35 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
         model_json, JSON_C_TO_STRING_PLAIN);
     if (strcmp(model, "instruct") == 0)
     {
-        asprintf(&data, "{\"model\": %s, \"messages\": [{\"role\": \"system\", \"content\": \"You are a helpful assistant.\"}, {\"role\": \"user\", \"content\": \"%s\"}], \"max_tokens\": %d, \"temperature\": %f}", encoded_model, prompt, MAX_OUTPUT_TOKENS, temperature);
+        if (asprintf(&request_data, "{\"model\": %s, \"messages\": [{\"role\": \"system\", \"content\": \"You are a helpful assistant.\"}, {\"role\": \"user\", \"content\": \"%s\"}], \"max_tokens\": %d, \"temperature\": %f}", encoded_model, prompt, MAX_OUTPUT_TOKENS, temperature) < 0)
+            request_data = NULL;
     }
     else
     {
-        asprintf(&data, "{\"model\": %s,\"messages\": %s, \"max_tokens\": %d, \"temperature\": %f}", encoded_model, prompt, MAX_OUTPUT_TOKENS, temperature);
+        if (asprintf(&request_data, "{\"model\": %s,\"messages\": %s, \"max_tokens\": %d, \"temperature\": %f}", encoded_model, prompt, MAX_OUTPUT_TOKENS, temperature) < 0)
+            request_data = NULL;
     }
     json_object_put(model_json);
+    if (request_data == NULL)
+    {
+        free(auth_header);
+        free(configured_api_key);
+        return NULL;
+    }
     curl_global_init(CURL_GLOBAL_DEFAULT);
-    do
+    for (int attempt = 0; attempt < tries && answer == NULL; attempt++)
     {
         struct MemoryStruct chunk;
+        long http_status = 0;
 
         chunk.memory = malloc(1); /* will be grown as needed by the realloc above */
         chunk.size = 0;           /* no data at this point */
+
+        if (chunk.memory == NULL)
+        {
+            fprintf(stderr, "Unable to allocate ChatAFL LLM response buffer.\n");
+            break;
+        }
 
         curl = curl_easy_init();
         if (curl)
@@ -105,41 +173,29 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
             headers = curl_slist_append(headers, accept_header);
 
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request_data);
             curl_easy_setopt(curl, CURLOPT_URL, url);
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, chat_with_llm_helper);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 10000L);
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 120000L);
+            curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
             res = curl_easy_perform(curl);
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status);
 
-            if (res == CURLE_OK)
+            if (res == CURLE_OK && http_status >= 200 && http_status < 300)
             {
-                json_object *jobj = json_tokener_parse(chunk.memory);
-
-                // Check if the "choices" key exists
-                if (json_object_object_get_ex(jobj, "choices", NULL))
-                {
-                    json_object *choices = json_object_object_get(jobj, "choices");
-                    json_object *first_choice = json_object_array_get_idx(choices, 0);
-                    const char *data;
-
-                    json_object *jobj4 = json_object_object_get(first_choice, "message");
-                    json_object *jobj5 = json_object_object_get(jobj4, "content");
-                    data = json_object_get_string(jobj5);
-                    if (data[0] == '\n')
-                        data++;
-                    answer = strdup(data);
-                }
-                else
-                {
-                    printf("Error response is: %s\n", chunk.memory);
-                    sleep(2); // Sleep for a small amount of time to ensure that the service can recover
-                }
-                json_object_put(jobj);
+                answer = parse_llm_response(chunk.memory, http_status);
+                if (answer == NULL)
+                    fprintf(stderr, "ChatAFL LLM response failed schema validation (HTTP %ld).\n", http_status);
             }
             else
             {
-                printf("Error: %s\n", curl_easy_strerror(res));
+                if (res == CURLE_OK)
+                    fprintf(stderr, "ChatAFL LLM request returned HTTP %ld.\n", http_status);
+                else
+                    fprintf(stderr, "ChatAFL LLM request failed: %s.\n", curl_easy_strerror(res));
             }
 
             curl_slist_free_all(headers);
@@ -147,11 +203,13 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
         }
 
         free(chunk.memory);
-    } while ((res != CURLE_OK || answer == NULL) && (--tries > 0));
+        if (answer == NULL && attempt + 1 < tries)
+            sleep(2); /* Give a transient gateway/upstream failure time to recover. */
+    }
 
-    if (data != NULL)
+    if (request_data != NULL)
     {
-        free(data);
+        free(request_data);
     }
     free(auth_header);
     free(configured_api_key);
@@ -237,12 +295,21 @@ char *construct_prompt_for_remaining_templates(char *protocol_name, char *first_
 
 char *extract_stalled_message(char *message, size_t message_len)
 {
+    if (message == NULL || message_len == 0)
+        return NULL;
 
     int errornumber;
     size_t erroroffset;
     // After a lot of iterations, the model consistently responds with an empty line and then a line of text
     pcre2_code *extracter = pcre2_compile("\r?\n?.*?\r?\n", PCRE2_ZERO_TERMINATED, 0, &errornumber, &erroroffset, NULL);
+    if (extracter == NULL)
+        return NULL;
     pcre2_match_data *match_data = pcre2_match_data_create_from_pattern(extracter, NULL);
+    if (match_data == NULL)
+    {
+        pcre2_code_free(extracter);
+        return NULL;
+    }
     int rc = pcre2_match(extracter, message, message_len, 0, 0, match_data, NULL);
     char *res = NULL;
     if (rc >= 0)
@@ -259,6 +326,8 @@ char *extract_stalled_message(char *message, size_t message_len)
 
 char *format_request_message(char *message)
 {
+    if (message == NULL || message[0] == '\0')
+        return message;
 
     int message_len = strlen(message);
     int max_len = message_len;
@@ -389,37 +458,132 @@ char *construct_prompt_for_requests_to_states(const char *protocol_name,
     return prompt;
 }
 
-void extract_message_grammars(char *answers, klist_t(gram) * grammar_list)
+static const char *find_json_array_end(const char *start)
 {
+    int depth = 0;
+    int in_string = 0;
+    int escaped = 0;
+    const char *cursor;
 
-    char *ptr = answers;
-    int len = strlen(answers);
-
-    while (ptr < answers + len)
+    for (cursor = start; *cursor != '\0'; cursor++)
     {
-        char *start = strchr(ptr, '[');
+        if (in_string)
+        {
+            if (escaped)
+                escaped = 0;
+            else if (*cursor == '\\')
+                escaped = 1;
+            else if (*cursor == '"')
+                in_string = 0;
+            continue;
+        }
+
+        if (*cursor == '"')
+        {
+            in_string = 1;
+        }
+        else if (*cursor == '[')
+        {
+            depth++;
+        }
+        else if (*cursor == ']' && --depth == 0)
+        {
+            return cursor;
+        }
+    }
+
+    return NULL;
+}
+
+static int valid_grammar_array(json_object *grammar)
+{
+    if (grammar == NULL || !json_object_is_type(grammar, json_type_array) ||
+        json_object_array_length(grammar) == 0)
+        return 0;
+
+    for (size_t i = 0; i < json_object_array_length(grammar); i++)
+    {
+        json_object *value = json_object_array_get_idx(grammar, i);
+        const char *value_string;
+
+        if (value == NULL || !json_object_is_type(value, json_type_string))
+            return 0;
+        value_string = json_object_get_string(value);
+        if (value_string == NULL || value_string[0] == '\0')
+            return 0;
+    }
+
+    return 1;
+}
+
+int extract_message_grammars(char *answers, klist_t(gram) * grammar_list)
+{
+    int valid_count = 0;
+    const char *ptr;
+
+    if (answers == NULL || grammar_list == NULL)
+        return 0;
+
+    ptr = answers;
+
+    while (*ptr != '\0')
+    {
+        const char *start = strchr(ptr, '[');
+        const char *end;
+        size_t count;
+        char *temp;
+        json_object *jobj;
+
         if (start == NULL)
             break;
-        char *end = strchr(start, ']');
+
+        end = find_json_array_end(start);
         if (end == NULL)
             break;
-        int count = end - start + 1;
-        char *temp = (char *)ck_alloc(count + 1);
+
+        count = (size_t)(end - start + 1);
+        temp = (char *)ck_alloc(count + 1);
         strncpy(temp, start, count);
         temp[count] = '\0';
         ptr = end + 1;
 
-        // conver temp to json object and save it to the list
-        json_object *jobj = json_tokener_parse(temp);
-        *kl_pushp(gram, grammar_list) = jobj;
+        jobj = json_tokener_parse(temp);
+        if (valid_grammar_array(jobj))
+        {
+            *kl_pushp(gram, grammar_list) = jobj;
+            valid_count++;
+        }
+        else if (jobj != NULL)
+        {
+            json_object_put(jobj);
+        }
+        ck_free(temp);
 
-        // printf("%s\n", temp);
     }
+
+    return valid_count;
 }
 
-int parse_pattern(pcre2_code *replacer, pcre2_match_data *match_data, const char *str, size_t len, char *pattern)
+static int append_pattern_text(char *pattern, size_t pattern_size,
+                               const char *text, size_t text_len)
 {
-    strcat(pattern, "(?:");
+    size_t used = strlen(pattern);
+
+    if (text == NULL || used >= pattern_size || text_len >= pattern_size - used)
+        return 0;
+    memcpy(pattern + used, text, text_len);
+    pattern[used + text_len] = '\0';
+    return 1;
+}
+
+int parse_pattern(pcre2_code *replacer, pcre2_match_data *match_data,
+                  const char *str, size_t len, char *pattern,
+                  size_t pattern_size)
+{
+    if (replacer == NULL || match_data == NULL || str == NULL || pattern == NULL ||
+        !append_pattern_text(pattern, pattern_size, "(?:", 3))
+        return 0;
+
     // offset == 3;
     int rc = pcre2_match(replacer, str, len, 0, 0, match_data, NULL);
 
@@ -446,27 +610,39 @@ int parse_pattern(pcre2_code *replacer, pcre2_match_data *match_data, const char
 
     if (rc == 4)
     { // matched the first option - there is a special value
-        strncat(pattern, str + ovector[2], ovector[3] - ovector[2]);
+        if (!append_pattern_text(pattern, pattern_size, str + ovector[2],
+                                 ovector[3] - ovector[2]) ||
+            !append_pattern_text(pattern, pattern_size, "(.*)", 4) ||
+            !append_pattern_text(pattern, pattern_size, str + ovector[6],
+                                 ovector[7] - ovector[6]))
+        {
+            pcre2_match_data_free(match_data);
+            pcre2_code_free(replacer);
+            return 0;
+        }
         // offset += ovector[3] - ovector[2];
-
-        strcat(pattern, "(.*)");
         // offset += 3;
-
-        strncat(pattern, str + ovector[6], ovector[7] - ovector[6]);
         // offset += ovector[7] - ovector[6];
     }
     else if (rc == 5)
     {
         // matched the second option - there is no special value
-        strncat(pattern, str + ovector[8], ovector[9] - ovector[8]);
+        if (!append_pattern_text(pattern, pattern_size, str + ovector[8],
+                                 ovector[9] - ovector[8]))
+        {
+            pcre2_match_data_free(match_data);
+            pcre2_code_free(replacer);
+            return 0;
+        }
         // offset += ovector[9] - ovector[8];
     }
     else
     {
-        FATAL("Regex groups were updated but not the handling code.");
+        pcre2_match_data_free(match_data);
+        pcre2_code_free(replacer);
+        return 0;
     }
-    strcat(pattern, ")");
-    return 1;
+    return append_pattern_text(pattern, pattern_size, ")", 1);
 }
 
 // If successful, puts 2 patterns in the patterns array, the first one is the header, the second is the fields
@@ -477,9 +653,22 @@ char *extract_message_pattern(const char *header_str, khash_t(field_table) * fie
     size_t erroroffset;
     char header_pattern[128] = {0};
     char fields_pattern[1024] = {0};
-    pcre2_code *replacer = pcre2_compile("(?:(.*)(?:<<(.*)>>)(.*))|(.+)", PCRE2_ZERO_TERMINATED, PCRE2_DOTALL, &errornumber, &erroroffset, NULL);
-    pcre2_match_data *match_data = pcre2_match_data_create_from_pattern(replacer, NULL);
+    pcre2_code *replacer;
+    pcre2_match_data *match_data;
     char *message_type = NULL;
+
+    if (header_str == NULL || field_table == NULL || patterns == NULL)
+        return NULL;
+
+    replacer = pcre2_compile("(?:(.*)(?:<<(.*)>>)(.*))|(.+)", PCRE2_ZERO_TERMINATED, PCRE2_DOTALL, &errornumber, &erroroffset, NULL);
+    if (replacer == NULL)
+        return NULL;
+    match_data = pcre2_match_data_create_from_pattern(replacer, NULL);
+    if (match_data == NULL)
+    {
+        pcre2_code_free(replacer);
+        return NULL;
+    }
     // int offset = 0;
     /**
      * Example output
@@ -506,8 +695,9 @@ char *extract_message_pattern(const char *header_str, khash_t(field_table) * fie
         message_type[message_len] = '\0';
 
         size_t len = strlen(header_str) - 1;
-        strcat(header_pattern, "^"); // Ensure that it captures the start of the string
-        if (!parse_pattern(replacer, match_data, header_str, len, header_pattern))
+        if (!append_pattern_text(header_pattern, sizeof(header_pattern), "^", 1) ||
+            !parse_pattern(replacer, match_data, header_str, len, header_pattern,
+                           sizeof(header_pattern)))
         {
             patterns[0] = NULL;
             return NULL;
@@ -524,7 +714,11 @@ char *extract_message_pattern(const char *header_str, khash_t(field_table) * fie
 
         if (!first)
         {
-            strcat(fields_pattern, "|");
+            if (!append_pattern_text(fields_pattern, sizeof(fields_pattern), "|", 1))
+            {
+                patterns[0] = NULL;
+                return NULL;
+            }
         }
         else
         {
@@ -537,7 +731,8 @@ char *extract_message_pattern(const char *header_str, khash_t(field_table) * fie
         // The string contains quotations so they are ignored
         str++;
         size_t len = strlen(str) - 1;
-        int matched = parse_pattern(replacer, match_data, str, len, fields_pattern);
+        int matched = parse_pattern(replacer, match_data, str, len, fields_pattern,
+                                    sizeof(fields_pattern));
         json_object_put(field_v);
         if (!matched)
         {
@@ -546,7 +741,11 @@ char *extract_message_pattern(const char *header_str, khash_t(field_table) * fie
         }
     }
 
-    strcat(fields_pattern, ")");
+    if (!append_pattern_text(fields_pattern, sizeof(fields_pattern), ")", 1))
+    {
+        patterns[0] = NULL;
+        return NULL;
+    }
 
     if (first == 1)
     { // convert from (?|) to (.+) when the group is empty
@@ -568,11 +767,22 @@ char *extract_message_pattern(const char *header_str, khash_t(field_table) * fie
 
     {
         pcre2_code *p = pcre2_compile(header_pattern, PCRE2_ZERO_TERMINATED, 0, &errornumber, &erroroffset, NULL);
+        if (p == NULL)
+        {
+            patterns[0] = NULL;
+            return NULL;
+        }
         pcre2_jit_compile(p, PCRE2_JIT_COMPLETE);
         patterns[0] = p;
     }
     {
         pcre2_code *p = pcre2_compile(fields_pattern, PCRE2_ZERO_TERMINATED, 0, &errornumber, &erroroffset, NULL);
+        if (p == NULL)
+        {
+            pcre2_code_free(patterns[0]);
+            patterns[0] = NULL;
+            return NULL;
+        }
         pcre2_jit_compile(p, PCRE2_JIT_COMPLETE);
         patterns[1] = p;
     }
@@ -690,6 +900,9 @@ range_list get_mutable_ranges(char *line, int length, int offset, pcre2_code *pa
 
 char *unescape_string(const char *input)
 {
+    if (input == NULL)
+        return NULL;
+
     size_t length = strlen(input);
     char *output = (char *)malloc((length + 1) * sizeof(char));
 
@@ -736,6 +949,9 @@ char *unescape_string(const char *input)
 
 void write_new_seeds(char *enriched_file, char *contents)
 {
+    if (enriched_file == NULL || contents == NULL || contents[0] == '\0')
+        return;
+
     FILE *fp = fopen(enriched_file, "w");
     if (fp == NULL)
     {
@@ -751,8 +967,8 @@ void write_new_seeds(char *enriched_file, char *contents)
 
     // Check if last 4 characters of the client_request_answer string are \r\n\r\n
     // If not, add them
-    int len = strlen(contents);
-    if (contents[len - 1] != '\n' || contents[len - 2] != '\r' || contents[len - 3] != '\n' || contents[len - 4] != '\r')
+    size_t len = strlen(contents);
+    if (len < 4 || contents[len - 1] != '\n' || contents[len - 2] != '\r' || contents[len - 3] != '\n' || contents[len - 4] != '\r')
     {
         fprintf(fp, "%s\r\n\r\n", contents);
     }
@@ -766,13 +982,19 @@ void write_new_seeds(char *enriched_file, char *contents)
 
 char *format_string(char *state_string)
 {
-    // remove the newline and whiltespace in the beginning of the string if any
-    while (state_string[0] == '\n' || state_string[0] == ' ' || state_string[0] == '\t' || state_string[0] == '\r')
-    {
-        state_string++;
-    }
+    if (state_string == NULL || state_string[0] == '\0')
+        return state_string;
 
-    int len = strlen(state_string);
+    // remove the newline and whiltespace in the beginning of the string if any
+    char *start = state_string;
+    while (start[0] == '\n' || start[0] == ' ' || start[0] == '\t' || start[0] == '\r')
+        start++;
+    if (start != state_string)
+        memmove(state_string, start, strlen(start) + 1);
+
+    size_t len = strlen(state_string);
+    if (len == 0)
+        return state_string;
     while (state_string[len - 1] == '\n' || state_string[len - 1] == '\r' || state_string[len - 1] == ' ' || state_string[len - 1] == '.')
     {
         state_string[len - 1] = '\0';

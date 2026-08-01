@@ -458,7 +458,14 @@ void setup_llm_grammars()
     // printf("## Remaining templates:\n %s\n", remaining_templates);
 
     char *combined_templates = NULL;
-    asprintf(&combined_templates, "%s\n%s", templates_answer, remaining_templates);
+    if (asprintf(&combined_templates, "%s\n%s", templates_answer, remaining_templates) < 0 ||
+        combined_templates == NULL)
+    {
+      free(remaining_templates);
+      free(remaining_prompt);
+      free(templates_answer);
+      continue;
+    }
 
     char *grammar_output_path = alloc_printf("%s/protocol-grammars/llm-grammar-output-%d", out_dir, iter);
     int grammar_output_fd = open(grammar_output_path, O_WRONLY | O_CREAT, 0600);
@@ -474,8 +481,30 @@ void setup_llm_grammars()
     for (iter = kl_begin(grammar_list); iter != kl_end(grammar_list); iter = kl_next(iter))
     {
       json_object *jobj = kl_val(iter);
+      if (jobj == NULL || !json_object_is_type(jobj, json_type_array) ||
+          json_object_array_length(jobj) == 0)
+        continue;
 
       json_object *header = json_object_array_get_idx(jobj, 0);
+      if (header == NULL || !json_object_is_type(header, json_type_string) ||
+          json_object_get_string(header) == NULL ||
+          json_object_get_string(header)[0] == '\0')
+        continue;
+
+      int valid_grammar = 1;
+      for (size_t i = 1; i < json_object_array_length(jobj); i++)
+      {
+        json_object *value = json_object_array_get_idx(jobj, i);
+        if (value == NULL || !json_object_is_type(value, json_type_string) ||
+            json_object_get_string(value) == NULL ||
+            json_object_get_string(value)[0] == '\0')
+        {
+          valid_grammar = 0;
+          break;
+        }
+      }
+      if (!valid_grammar)
+        continue;
 
       int absent;
 
@@ -488,7 +517,7 @@ void setup_llm_grammars()
         kh_value(const_table, k) = field_table;
       }
 
-      for (int i = 1; i < json_object_array_length(jobj); i++)
+      for (size_t i = 1; i < json_object_array_length(jobj); i++)
       {
         const char *v = json_object_get_string(json_object_array_get_idx(jobj, i));
         khash_t(field_table) *field_table = kh_value(const_table, k);
@@ -2757,14 +2786,24 @@ void get_seeds_with_messsage_types(const char *in_dir, khash_t(strSet) * message
         // Check whether the client_request_answer is the same as the nl_file_content or if the client_request_answer is empty
         char *formatted_nl_file_content = format_string(nl_file_content);
         char *unescaped_client_requests = unescape_string(client_request_answer);
+        if (unescaped_client_requests == NULL)
+        {
+          free(client_request_answer);
+          continue;
+        }
         char *formatted_unescaped_client_requests = format_string(unescaped_client_requests);
         // printf("## Formatted answer from LLM:\n %s\n", formatted_unescaped_client_requests);
         // printf("## Formatted file content:\n %s\n", formatted_nl_file_content);
-        if (formatted_unescaped_client_requests == NULL || strcmp(formatted_unescaped_client_requests, formatted_nl_file_content) == 0)
+        if (formatted_unescaped_client_requests == NULL || formatted_unescaped_client_requests[0] == '\0' ||
+            formatted_nl_file_content == NULL || strcmp(formatted_unescaped_client_requests, formatted_nl_file_content) == 0)
         {
           printf("## Skip the same seed\n");
+          free(unescaped_client_requests);
+          free(client_request_answer);
           continue;
         }
+
+        free(client_request_answer);
 
         unescaped_client_requests = format_request_message(unescaped_client_requests);
 
@@ -6974,6 +7013,8 @@ AFLNET_REGIONS_SELECTION:;
 
         char *stall_prompt = construct_prompt_stall(protocol_name, examples, history);
         // printf("Got prompt:\n\n%s\n",stall_prompt);
+        if (stall_prompt == NULL)
+          goto free_stall;
         char *stall_response = chat_with_llm(stall_prompt, "turbo", STALL_RETRIES, 1.5);
         // printf("Got response:\n\n%s\n",stall_response);
 
@@ -7004,7 +7045,11 @@ AFLNET_REGIONS_SELECTION:;
         char *stall_message = extract_stalled_message(stall_response, strlen(stall_response));
 
         if (stall_message == NULL)
+        {
+          free(stall_response);
+          stall_response = NULL;
           goto free_stall;
+        }
 
         stall_message = format_request_message(stall_message);
 
@@ -7030,6 +7075,8 @@ AFLNET_REGIONS_SELECTION:;
             }
 
             ck_free(stall_message);
+            free(stall_response);
+            stall_response = NULL;
 
             delete_kl_messages(kl_messages);
 

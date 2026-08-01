@@ -8,7 +8,7 @@ SAVETO=$3
 TARGET=$4
 OUTDIR=$5
 TIMEOUT=$6
-SKIPCOUNT=${7:-1}
+SKIPCOUNT=${7:-5}
 DELETE=${8:-}
 
 ROOT=$(cd "$(dirname "$0")" && pwd)

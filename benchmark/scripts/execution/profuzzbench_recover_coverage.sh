@@ -10,7 +10,7 @@ readonly WORKDIR=/home/ubuntu/experiments
 readonly SCRIPT_NAME=${0##*/}
 
 OUTPUT_ROOT="$PWD/coverage-recovery"
-SKIPCOUNT=1
+SKIPCOUNT=5
 REPLAY_TIMEOUT=7200
 DRY_RUN=0
 KEEP_COLLECTOR=0
@@ -26,7 +26,7 @@ modifies, or removes the source container.
 
 Options:
   --output-root DIR  Directory for recovered packages (default: $OUTPUT_ROOT)
-  --skipcount N      Coverage sampling interval (default: 1)
+  --skipcount N      Coverage sampling interval (default: 5)
   --replay-timeout N Maximum seconds for one collector replay (default: 7200)
   --keep-collector   Keep the disposable collector container for debugging
   --dry-run          Validate container metadata and print the recovery plan

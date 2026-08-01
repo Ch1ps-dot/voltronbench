@@ -73,7 +73,7 @@ char *construct_prompt_for_protocol_message_types(char *protocol_name);
 char *construct_prompt_for_requests_to_states(const char *protocol_name, const char *protocol_state, const char *example_requests);
 char *construct_prompt_stall(char *protocol_name, char *examples, char *history);
 
-void extract_message_grammars(char *answers, klist_t(gram) * grammar_set);
+int extract_message_grammars(char *answers, klist_t(gram) * grammar_set);
 char *extract_message_pattern(const char *header_str,
                                khash_t(field_table) * field_table,
                                pcre2_code **patterns,
