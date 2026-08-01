@@ -23,8 +23,8 @@ chmod go+w /home/ubuntu/ftpshare/data
 mkdir -p /home/ubuntu/ftpshare/home/ubuntu/experiments/bftpd-gcov/
 chmod -R go+w /home/ubuntu/ftpshare/home
 
-cp $WORKDIR/basic.config $WORKDIR/basic.config.bak
-perl -p -i -e 's|AUTO_CHDIR="[^"]*"|AUTO_CHDIR="/data"|' ../basic.conf
+cp "$WORKDIR/basic.conf" "$WORKDIR/basic.conf.bak"
+perl -p -i -e 's|AUTO_CHDIR="[^"]*"|AUTO_CHDIR="/data"|' "$WORKDIR/basic.conf"
 
 #output the header of the coverage file which is in the CSV format
 #Time: timestamp, l_per/b_per and l_abs/b_abs: line/branch coverage in percentage and absolutate number
@@ -112,4 +112,4 @@ then
   echo "$time,$l_per,$l_abs,$b_per,$b_abs" >> $covfile
 fi
 
-cp $WORKDIR/basic.config.bak $WORKDIR/basic.config
+cp "$WORKDIR/basic.conf.bak" "$WORKDIR/basic.conf"
