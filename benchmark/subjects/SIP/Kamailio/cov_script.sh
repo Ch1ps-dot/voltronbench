@@ -36,7 +36,7 @@ for f in "${seed_files[@]}"; do
   time=$(stat -c %Y $f)
 
   $replayer $f SIP $pno 1 > /dev/null 2>&1 & ./run_pjsip > /dev/null 2>&1 &
-  timeout -k 1s -s SIGTERM 3s ./kamailio-gcov/src/kamailio -f ./kamailio-basic.cfg -L ./kamailio-gcov/src/modules -Y ./kamailio-gcov/runtime_dir/ -n 1 -D -E > /dev/null 2>&1
+  timeout -k 1s -s SIGTERM 3s ./kamailio-gcov/src/kamailio -f ./kamailio-basic.cfg -l udp:127.0.0.1:5061 -L ./kamailio-gcov/src/modules -Y ./kamailio-gcov/runtime_dir/ -n 1 -D -E > /dev/null 2>&1
   
   wait
   cov_data=$(gcovr -r kamailio-gcov -s | grep "[lb][a-z]*:")
@@ -57,7 +57,7 @@ for f in "${testcases[@]}"; do
   time=$(stat -c %Y $f)
 
   $replayer $f SIP $pno 1 > /dev/null 2>&1 & ./run_pjsip > /dev/null 2>&1 &
-  timeout -k 1s -s SIGTERM 3s ./kamailio-gcov/src/kamailio -f ./kamailio-basic.cfg -L ./kamailio-gcov/src/modules -Y ./kamailio-gcov/runtime_dir/ -n 1 -D -E > /dev/null 2>&1
+  timeout -k 1s -s SIGTERM 3s ./kamailio-gcov/src/kamailio -f ./kamailio-basic.cfg -l udp:127.0.0.1:5061 -L ./kamailio-gcov/src/modules -Y ./kamailio-gcov/runtime_dir/ -n 1 -D -E > /dev/null 2>&1
 
   wait
   count=$(expr $count + 1)

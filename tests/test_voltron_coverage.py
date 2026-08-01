@@ -129,12 +129,20 @@ class VoltronCoverageExportTests(unittest.TestCase):
             / "execution"
             / "profuzzbench_voltron_container.sh"
         ).read_text(encoding="utf-8")
+        coverage_runner = (
+            PROJECT_ROOT
+            / "benchmark"
+            / "scripts"
+            / "execution"
+            / "profuzzbench_voltron_coverage.sh"
+        ).read_text(encoding="utf-8")
 
         self.assertIn(
             "profuzzbench_export_voltron_replay.py",
             host_runner,
         )
         self.assertIn("profuzzbench_voltron_coverage.sh", host_runner)
+        self.assertIn('PORT=5061', coverage_runner)
         self.assertIn(
             "dst=/opt/voltron-target-cov-script.sh",
             host_runner,
@@ -151,6 +159,9 @@ class VoltronCoverageExportTests(unittest.TestCase):
             "/bin/bash /opt/voltron-coverage.sh",
             container_runner,
         )
+        self.assertIn("NO_COMPLIANCE_INPUT", container_runner)
+        self.assertIn("postprocess_status.json", container_runner)
+        self.assertIn('"pair_status": "AVAILABLE"', container_runner)
         self.assertIn('set_stage "PACKAGING 3/4: creating archive"', container_runner)
         self.assertIn('set_stage "ARCHIVE READY 4/4"', container_runner)
         self.assertIn("Collecting archives", host_runner)

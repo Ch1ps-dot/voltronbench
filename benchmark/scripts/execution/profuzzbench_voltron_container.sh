@@ -65,6 +65,24 @@ apply_main_runtime_patch() {
 
 apply_main_runtime_patch
 
+apply_udp_bind_runtime_patch() {
+  local patch_file=/opt/voltron-udp-bind-runtime.patch
+
+  [ -r "$patch_file" ] || return 0
+  if grep -Fq 'self.local_port = (' voltron/executor/executor.py \
+    && grep -Fq 'sock.bind((self.host, self.local_port))' \
+      voltron/executor/executor.py; then
+    printf 'VOLTRON: UDP bind runtime patch is already present\n'
+    return 0
+  fi
+  if ! patch --batch --forward -p1 < "$patch_file"; then
+    printf 'VOLTRON: UDP bind runtime patch did not apply\n' >&2
+    return 1
+  fi
+}
+
+apply_udp_bind_runtime_patch
+
 apply_generator_evolution_runtime_patch() {
   local patch_file=/opt/voltron-generator-evolution-runtime.patch
 
@@ -131,12 +149,58 @@ record_status() {
     "${chat_tokens:-0}" >> "$PLOT_DATA"
 }
 
+export_synthesized_component() {
+  local component_root="$OUTDIR/synthesized_component"
+  local equipment_source="component/equipment/$VOLTRON_TARGET"
+  local models_source="component/models/$VOLTRON_TARGET"
+  local manifest="$component_root/export_manifest.txt"
+  local status=0
+
+  set_stage "FINALIZING 0/4: exporting synthesized components"
+  mkdir -p "$component_root/equipment" "$component_root/models"
+  printf 'target=%s\n' "$VOLTRON_TARGET" > "$manifest"
+  printf 'source_root=%s\n' "$VOLTRON_DIR" >> "$manifest"
+
+  if [ -d "$equipment_source" ]; then
+    cp -a "$equipment_source" "$component_root/equipment/"
+    printf 'equipment=exported\n' >> "$manifest"
+  else
+    printf 'equipment=missing\n' >> "$manifest"
+    status=1
+  fi
+
+  if [ -d "$models_source" ]; then
+    cp -a "$models_source" "$component_root/models/"
+    printf 'models=exported\n' >> "$manifest"
+  else
+    printf 'models=missing\n' >> "$manifest"
+    status=1
+  fi
+
+  printf 'export_status=%s\n' "$status" >> "$manifest"
+  return "$status"
+}
+
 run_compliance_analysis() {
   local log_file="$OUTDIR/analyze_compliance.log"
+  local pair_files=()
 
   set_stage "FINALIZING 1/4: compliance analysis"
   printf 'Running compliance analysis for %s with %s\n' \
     "$VOLTRON_TARGET" "$COMPLIANCE_ANALYZER" | tee "$log_file"
+
+  shopt -s nullglob
+  pair_files=(
+    "$OUTDIR"/pair_*.json
+    "$OUTDIR"/request_response_pairs/pair_*.json
+  )
+  PAIR_COUNT=${#pair_files[@]}
+  if (( PAIR_COUNT == 0 )); then
+    COMPLIANCE_STATE=NO_COMPLIANCE_INPUT
+    printf 'NO_COMPLIANCE_INPUT: no pair_*.json files were produced\n' \
+      | tee -a "$log_file"
+    return 3
+  fi
 
   if [ -f "$COMPLIANCE_ANALYZER" ]; then
     uv run python "$COMPLIANCE_ANALYZER" \
@@ -149,6 +213,55 @@ run_compliance_analysis() {
       --input "$OUTDIR" \
       --output "$OUTDIR" >> "$log_file" 2>&1
   fi
+  local status=$?
+  if [ "$status" -eq 0 ]; then
+    COMPLIANCE_STATE=COMPLETED
+  else
+    COMPLIANCE_STATE=FAILED
+  fi
+  return "$status"
+}
+
+write_postprocess_status() {
+  python3 - \
+    "$OUTDIR/postprocess_status.json" \
+    "$STATUS" \
+    "$PAIR_COUNT" \
+    "$COMPLIANCE_STATE" \
+    "$COMPLIANCE_STATUS" \
+    "$COVERAGE_STATE" \
+    "$COVERAGE_STATUS" \
+    "$COMPONENT_EXPORT_STATUS" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+(
+    output_path,
+    voltron_status,
+    pair_count,
+    compliance_state,
+    compliance_status,
+    coverage_state,
+    coverage_status,
+    component_export_status,
+) = sys.argv[1:]
+payload = {
+    "voltron_status": int(voltron_status),
+    "pair_status": "AVAILABLE" if int(pair_count) > 0 else "EMPTY",
+    "pair_count": int(pair_count),
+    "compliance_status": compliance_state,
+    "compliance_exit_code": int(compliance_status),
+    "coverage_status": coverage_state,
+    "coverage_exit_code": int(coverage_status),
+    "component_export_status": "COMPLETED"
+    if int(component_export_status) == 0 else "PARTIAL",
+}
+target = Path(output_path)
+temporary = target.with_suffix(target.suffix + ".tmp")
+temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+temporary.replace(target)
+PY
 }
 
 run_code_coverage() {
@@ -185,11 +298,23 @@ wait "$FUZZ_PID"
 STATUS=$?
 record_status
 
+COMPONENT_EXPORT_STATUS=0
+export_synthesized_component || COMPONENT_EXPORT_STATUS=$?
+
+PAIR_COUNT=0
+COMPLIANCE_STATE=FAILED
 run_compliance_analysis
 COMPLIANCE_STATUS=$?
 
 run_code_coverage
 COVERAGE_STATUS=$?
+if [ "$COVERAGE_STATUS" -eq 0 ]; then
+  COVERAGE_STATE=COMPLETED
+else
+  COVERAGE_STATE=FAILED
+fi
+
+write_postprocess_status
 
 set_stage "PACKAGING 3/4: creating archive"
 tar -zcf "${OUTDIR}.tar.gz" "$OUTDIR"

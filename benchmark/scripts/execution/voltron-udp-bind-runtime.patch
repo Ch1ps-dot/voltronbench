@@ -1,0 +1,27 @@
+--- a/voltron/executor/executor.py
++++ b/voltron/executor/executor.py
+@@ -83,6 +83,14 @@
+         self.host = configs.host
+         self.port = configs.port
+         self.trans_layer = configs.trans_layer
++        # Kamailio listens on 5061; SIP seeds advertise 127.0.0.1:5062 in
++        # Via/Contact so replies return to the executor on a distinct port.
++        self.local_port = (
++            5062
++            if self.trans_layer == 'udp'
++            and getattr(configs, 'target_name', '') == 'kamailio'
++            else None
++        )
+         self.sut_deployment = getattr(configs, 'sut_deployment', 'local')
+         self.sut_monitor = build_sut_monitor(configs)
+         self.try_times_parser = 2
+@@ -1025,6 +1034,9 @@
+                 if (self.trans_layer == 'tcp'):
+                     sock = socket.create_connection((self.host, self.port))
+                 elif (self.trans_layer == 'udp'):
+                     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
++                    if self.local_port is not None:
++                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
++                        sock.bind((self.host, self.local_port))
+                 else:
+                     return None

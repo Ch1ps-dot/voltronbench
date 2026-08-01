@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import tempfile
+import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,31 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def read_postprocess_status(archive: Path) -> dict[str, Any]:
+    """Read the bounded Voltron stage summary embedded in a result archive."""
+    try:
+        with tarfile.open(archive, "r:gz") as result_archive:
+            member = next(
+                (
+                    item
+                    for item in result_archive.getmembers()
+                    if item.isfile()
+                    and item.name.endswith("/postprocess_status.json")
+                    and item.size <= 64 * 1024
+                ),
+                None,
+            )
+            if member is None:
+                return {}
+            stream = result_archive.extractfile(member)
+            if stream is None:
+                return {}
+            value = json.loads(stream.read().decode("utf-8"))
+            return value if isinstance(value, dict) else {}
+    except (OSError, tarfile.TarError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
 
 
 def parse_args() -> argparse.Namespace:
@@ -85,6 +111,19 @@ def main() -> int:
         archive = args.archive_path.resolve()
         record["archive_path"] = str(archive)
         record["archive_sha256"] = sha256(archive)
+        stage_status = read_postprocess_status(archive)
+        for key in (
+            "voltron_status",
+            "pair_status",
+            "pair_count",
+            "compliance_status",
+            "compliance_exit_code",
+            "coverage_status",
+            "coverage_exit_code",
+            "component_export_status",
+        ):
+            if key in stage_status:
+                record[key] = stage_status[key]
 
     lock_path = manifest.with_suffix(manifest.suffix + ".lock")
     with lock_path.open("a+") as lock:

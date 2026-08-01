@@ -248,6 +248,7 @@ for i in $(seq 1 "$RUNS"); do
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_voltron_container.sh,dst=/opt/voltron-benchmark-runner.sh,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-subject-overrides,dst=/opt/voltron-subject-overrides,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-main-runtime.patch,dst=/opt/voltron-main-runtime.patch,readonly"
+    --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-udp-bind-runtime.patch,dst=/opt/voltron-udp-bind-runtime.patch,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-generator-evolution-runtime.patch,dst=/opt/voltron-generator-evolution-runtime.patch,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_export_voltron_replay.py,dst=/opt/voltron-export-aflnet-replay.py,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_voltron_coverage.sh,dst=/opt/voltron-coverage.sh,readonly"

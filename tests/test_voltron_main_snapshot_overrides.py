@@ -8,6 +8,21 @@ EXECUTION_DIR = PROJECT_ROOT / "benchmark" / "scripts" / "execution"
 
 
 class VoltronMainSnapshotOverrideTests(unittest.TestCase):
+    def test_kamailio_voltron_ports_are_consistent(self) -> None:
+        kamailio_runner = (
+            EXECUTION_DIR / "voltron-subject-overrides" / "kamailio" / "run.sh"
+        ).read_text(encoding="utf-8")
+        coverage_runner = (
+            EXECUTION_DIR / "profuzzbench_voltron_coverage.sh"
+        ).read_text(encoding="utf-8")
+        udp_patch = (
+            EXECUTION_DIR / "voltron-udp-bind-runtime.patch"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("-l udp:127.0.0.1:5061", kamailio_runner)
+        self.assertIn("PORT=5061", coverage_runner)
+        self.assertIn("5062", udp_patch)
+
     def test_overrides_are_shell_valid_and_cover_failed_suts(self) -> None:
         expected = {
             "forked-daapd": {"setup.sh", "run.sh"},
