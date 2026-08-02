@@ -56,16 +56,38 @@ apply_subject_overrides() {
 
 apply_subject_overrides
 
+main_runtime_patch_is_present() {
+  local synthesizer=voltron/synthesizer/synthesizer.py
+
+  # The original main snapshot used these explicit terminal messages.  Keep
+  # this branch for older Voltron revisions to which the runtime patch applies.
+  if grep -Fq 'giving up mutator generation for %s after %d attempts' \
+    "$synthesizer" \
+    && grep -Fq 'giving up checker generation for %s after %d attempts' \
+      "$synthesizer" \
+    && grep -Fq 'giving up observer generation for %s after %d attempts' \
+      "$synthesizer"; then
+    return 0
+  fi
+
+  # Voltron main after PR #19 retains bounded retries but deliberately changes
+  # mutator/observer failures into validated fallbacks.  Its log text differs
+  # from the older patch, so recognize the capabilities instead of attempting
+  # to apply an obsolete multi-hunk patch to an already hardened source tree.
+  grep -Fq 'generation_retry_limit' "$synthesizer" \
+    && grep -Fq "'Producer: falling back to the best generator for %s after %d attempts'" \
+      "$synthesizer" \
+    && grep -Fq 'RAW_SHA256_OBSERVER' "$synthesizer" \
+    && grep -Fq 'using raw SHA-256 observer fallback for %s' "$synthesizer" \
+    && grep -Fq 'giving up checker generation for %s after %d attempts' \
+      "$synthesizer"
+}
+
 apply_main_runtime_patch() {
   local patch_file=/opt/voltron-main-runtime.patch
 
   [ -r "$patch_file" ] || return 0
-  if grep -Fq 'giving up mutator generation for %s after %d attempts' \
-    voltron/synthesizer/synthesizer.py \
-    && grep -Fq 'giving up checker generation for %s after %d attempts' \
-      voltron/synthesizer/synthesizer.py \
-    && grep -Fq 'giving up observer generation for %s after %d attempts' \
-      voltron/synthesizer/synthesizer.py; then
+  if main_runtime_patch_is_present; then
     printf 'VOLTRON: main-snapshot runtime patch is already present\n'
     return 0
   fi

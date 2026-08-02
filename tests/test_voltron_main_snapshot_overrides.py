@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 
 
@@ -71,7 +72,14 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
         self.assertIn("voltron-generator-evolution-runtime.patch", host_runner)
         self.assertIn("apply_subject_overrides", container_runner)
         self.assertIn("apply_main_runtime_patch", container_runner)
+        self.assertIn("main_runtime_patch_is_present", container_runner)
         self.assertIn("apply_generator_evolution_runtime_patch", container_runner)
+        self.assertIn(
+            "falling back to the best generator for %s after %d attempts",
+            container_runner,
+        )
+        self.assertIn("RAW_SHA256_OBSERVER", container_runner)
+        self.assertIn("using raw SHA-256 observer fallback", container_runner)
         self.assertIn("COMPLIANCE_ANALYZER:-analyze_compliance.py", container_runner)
         self.assertIn('--input "$OUTDIR"', container_runner)
         self.assertIn("generation_retry_limit", runtime_patch)
@@ -83,6 +91,38 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
         self.assertIn("no generated baseline exists", generator_patch)
         self.assertIn("PLAY_NOTIFY (scale-change)", generator_patch)
         self.assertNotIn("lighttpd", str(list((EXECUTION_DIR / "voltron-subject-overrides").rglob("*"))))
+
+    def test_main_runtime_detector_recognizes_hardened_upstream_source(self) -> None:
+        runner = (
+            EXECUTION_DIR / "profuzzbench_voltron_container.sh"
+        ).read_text(encoding="utf-8")
+        start = runner.index("main_runtime_patch_is_present()")
+        end = runner.index("apply_main_runtime_patch()")
+        detector = runner[start:end]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "voltron" / "synthesizer"
+            source.mkdir(parents=True)
+            (source / "synthesizer.py").write_text(
+                "\n".join(
+                    [
+                        "generation_retry_limit",
+                        "'Producer: falling back to the best generator for %s after %d attempts'",
+                        "RAW_SHA256_OBSERVER",
+                        "using raw SHA-256 observer fallback for %s",
+                        "giving up checker generation for %s after %d attempts",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                ["bash", "-c", f"{detector}\nmain_runtime_patch_is_present"],
+                cwd=temporary,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 if __name__ == "__main__":
