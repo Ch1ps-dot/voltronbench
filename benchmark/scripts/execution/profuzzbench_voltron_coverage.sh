@@ -42,7 +42,7 @@ case "$TARGET" in
         ;;
     kamailio)
         COVERAGE_DIR="$WORKDIR"
-        PORT=5061
+        PORT=5060
         ;;
     exim)
         COVERAGE_DIR="$WORKDIR/exim-gcov"

@@ -1,13 +1,14 @@
 --- a/voltron/executor/executor.py
 +++ b/voltron/executor/executor.py
-@@ -83,6 +83,14 @@
+@@ -83,6 +83,15 @@
          self.host = configs.host
          self.port = configs.port
          self.trans_layer = configs.trans_layer
-+        # Kamailio listens on 5061; SIP seeds advertise 127.0.0.1:5062 in
-+        # Via/Contact so replies return to the executor on a distinct port.
++        # Kamailio's SIP seeds advertise 127.0.0.1:5061 in Via/Contact.
++        # Bind the UDP client socket to that port so replies return to the
++        # executor instead of being sent to an unrelated ephemeral port.
 +        self.local_port = (
-+            5062
++            5061
 +            if self.trans_layer == 'udp'
 +            and getattr(configs, 'target_name', '') == 'kamailio'
 +            else None

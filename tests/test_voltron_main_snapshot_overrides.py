@@ -18,10 +18,19 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
         udp_patch = (
             EXECUTION_DIR / "voltron-udp-bind-runtime.patch"
         ).read_text(encoding="utf-8")
+        aflnet_launcher = (
+            EXECUTION_DIR / "profuzzbench_exec_all.sh"
+        ).read_text(encoding="utf-8")
+        aflnet_runner = (
+            PROJECT_ROOT / "benchmark" / "subjects" / "SIP" / "Kamailio"
+            / "run.sh"
+        ).read_text(encoding="utf-8")
 
-        self.assertIn("-l udp:127.0.0.1:5061", kamailio_runner)
-        self.assertIn("PORT=5061", coverage_runner)
-        self.assertIn("5062", udp_patch)
+        self.assertNotIn("-l udp:127.0.0.1:5061", kamailio_runner)
+        self.assertIn("PORT=5060", coverage_runner)
+        self.assertIn("5061", udp_patch)
+        self.assertIn("-N udp://127.0.0.1/5060", aflnet_runner)
+        self.assertIn("-l 5061", aflnet_launcher)
 
     def test_overrides_are_shell_valid_and_cover_failed_suts(self) -> None:
         expected = {

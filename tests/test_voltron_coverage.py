@@ -142,7 +142,7 @@ class VoltronCoverageExportTests(unittest.TestCase):
             host_runner,
         )
         self.assertIn("profuzzbench_voltron_coverage.sh", host_runner)
-        self.assertIn('PORT=5061', coverage_runner)
+        self.assertIn('PORT=5060', coverage_runner)
         self.assertIn(
             "dst=/opt/voltron-target-cov-script.sh",
             host_runner,
