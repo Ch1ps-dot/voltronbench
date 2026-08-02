@@ -16,7 +16,7 @@ fi
 
 SOURCE_SHA256=$(
   cd "$ROOT/ChatAFL"
-  sha256sum chat-llm.c chatafl-runtime-config.h \
+  sha256sum chat-llm.c chat-llm.h chatafl-runtime-config.h \
     | sha256sum \
     | cut -d ' ' -f 1
 )
@@ -52,6 +52,8 @@ docker run --rm \
     cp -a /home/ubuntu/chatafl /tmp/chatafl-runtime-source
     cp /opt/voltronbench-chatafl/chat-llm.c \
       /tmp/chatafl-runtime-source/chat-llm.c
+    cp /opt/voltronbench-chatafl/chat-llm.h \
+      /tmp/chatafl-runtime-source/chat-llm.h
     cp /opt/voltronbench-chatafl/chatafl-runtime-config.h \
       /tmp/chatafl-runtime-source/chatafl-runtime-config.h
     cd /tmp/chatafl-runtime-source

@@ -275,6 +275,13 @@ class ChatAflRuntimePreparationTests(unittest.TestCase):
                 any(command.startswith("build ") for command in docker_commands)
             )
 
+            prepare_source = PREPARE_RUNTIME.read_text(encoding="utf-8")
+            self.assertIn("sha256sum chat-llm.c chat-llm.h", prepare_source)
+            self.assertIn(
+                "cp /opt/voltronbench-chatafl/chat-llm.h",
+                prepare_source,
+            )
+
     def test_all_target_images_use_the_runtime_compatible_base(self) -> None:
         dockerfiles = sorted(
             (PROJECT_ROOT / "benchmark" / "subjects").glob("*/*/Dockerfile")
