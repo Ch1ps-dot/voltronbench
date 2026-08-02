@@ -160,6 +160,10 @@ class VoltronCoverageExportTests(unittest.TestCase):
             container_runner,
         )
         self.assertIn("NO_COMPLIANCE_INPUT", container_runner)
+        self.assertIn(
+            "no pair_*.json files were produced (non-fatal)",
+            container_runner,
+        )
         self.assertIn("postprocess_status.json", container_runner)
         self.assertIn('"pair_status": "AVAILABLE"', container_runner)
         self.assertIn('set_stage "PACKAGING 3/4: creating archive"', container_runner)

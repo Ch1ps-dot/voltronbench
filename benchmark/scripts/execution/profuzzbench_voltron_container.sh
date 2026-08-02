@@ -197,9 +197,15 @@ run_compliance_analysis() {
   PAIR_COUNT=${#pair_files[@]}
   if (( PAIR_COUNT == 0 )); then
     COMPLIANCE_STATE=NO_COMPLIANCE_INPUT
-    printf 'NO_COMPLIANCE_INPUT: no pair_*.json files were produced\n' \
+    # Pair recording is optional for a fuzz run.  Voltron can finish the
+    # fuzzing and coverage stages while producing no eligible relation (for
+    # example when every interaction is rejected or interrupted).  Do not
+    # turn that lack of compliance input into a failed container: the
+    # postprocess manifest records the missing evidence explicitly and the
+    # fuzz/coverage exit statuses remain authoritative.
+    printf 'NO_COMPLIANCE_INPUT: no pair_*.json files were produced (non-fatal)\n' \
       | tee -a "$log_file"
-    return 3
+    return 0
   fi
 
   if [ -f "$COMPLIANCE_ANALYZER" ]; then
