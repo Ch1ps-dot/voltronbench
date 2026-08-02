@@ -259,6 +259,7 @@ write_chatafl_ephemeral_secret() {
 
 prepare_chatafl_runtime_inputs() {
     CHATAFL_API_MODE=direct
+    CHATAFL_SECRET_STAGING=none
     if [[ "$CHATAFL_USE_API_GATEWAY" == "1" ]]; then
         if [[ -n "${CHATAFL_MODEL:-}" \
             || -n "${CHATAFL_URL:-}" \
@@ -280,6 +281,7 @@ prepare_chatafl_runtime_inputs() {
             "$VOLTRON_GATEWAY_TOKEN" \
             gateway-token
         CHATAFL_API_KEY_SOURCE=gateway_internal_token
+        CHATAFL_SECRET_STAGING=container_root_copy
         CHATAFL_API_MODE=gateway
         export CHATAFL_DOCKER_NETWORK
         return
@@ -316,6 +318,7 @@ prepare_chatafl_runtime_inputs() {
             exit 1
         fi
         CHATAFL_API_KEY_SOURCE=runtime_secret_file
+        CHATAFL_SECRET_STAGING=container_root_copy
     elif [[ -n "${CHATAFL_API_KEY:-}" ]]; then
         if [[ "$CHATAFL_API_KEY" == *$'\n'* \
             || "$CHATAFL_API_KEY" == *$'\r'* ]]; then
@@ -324,6 +327,7 @@ prepare_chatafl_runtime_inputs() {
         fi
         write_chatafl_ephemeral_secret "$CHATAFL_API_KEY" api-key
         CHATAFL_API_KEY_SOURCE=runtime_ephemeral_secret
+        CHATAFL_SECRET_STAGING=container_root_copy
         unset CHATAFL_API_KEY
     fi
 }
@@ -460,6 +464,7 @@ fi
         printf 'chatafl_model=%s\n' "$CHATAFL_MODEL_EFFECTIVE"
         printf 'chatafl_url=%s\n' "$CHATAFL_URL_EFFECTIVE"
         printf 'chatafl_api_key_source=%s\n' "$CHATAFL_API_KEY_SOURCE"
+        printf 'chatafl_secret_staging=%s\n' "$CHATAFL_SECRET_STAGING"
         printf 'chatafl_runtime_binary_sha256=%s\n' \
             "$CHATAFL_RUNTIME_BINARY_SHA256"
         printf 'chatafl_runtime_source_sha256=%s\n' \

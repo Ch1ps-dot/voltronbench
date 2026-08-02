@@ -110,6 +110,7 @@ if [[ "$FUZZER" == "chatafl" ]]; then
   fi
 
   CHATAFL_API_KEY_SOURCE=compiled_default
+  CHATAFL_SECRET_STAGING=none
   if [[ -n "${CHATAFL_API_KEY_FILE:-}" ]]; then
     if [[ ! -f "$CHATAFL_API_KEY_FILE" \
       || ! -s "$CHATAFL_API_KEY_FILE" \
@@ -128,6 +129,7 @@ if [[ "$FUZZER" == "chatafl" ]]; then
     else
       CHATAFL_API_KEY_SOURCE=runtime_secret_file
     fi
+    CHATAFL_SECRET_STAGING=container_root_copy
   fi
 
   mkdir -p "$SAVETO"
@@ -139,6 +141,7 @@ if [[ "$FUZZER" == "chatafl" ]]; then
     printf 'effective_model=%s\n' "$CHATAFL_MODEL_EFFECTIVE"
     printf 'effective_url=%s\n' "$CHATAFL_URL_EFFECTIVE"
     printf 'api_key_source=%s\n' "$CHATAFL_API_KEY_SOURCE"
+    printf 'secret_staging=%s\n' "$CHATAFL_SECRET_STAGING"
     if [[ "$CHATAFL_API_MODE" == "gateway" ]]; then
       printf 'gateway_config_sha256=%s\n' \
         "${LLM_GATEWAY_CONFIG_SHA256:-unknown}"
@@ -200,6 +203,9 @@ trap handle_interrupt INT TERM
 #create one container for each run
 for i in $(seq 1 $RUNS); do
   docker_args=(run --cpus=1 -d -it)
+  run_command="cd ${WORKDIR} && run ${FUZZER} ${OUTDIR} '${OPTIONS}' ${TIMEOUT} ${SKIPCOUNT}"
+  container_command="$run_command"
+  container_command_args=()
   if [[ "$FUZZER" == "chatafl" ]]; then
     if [[ "$CHATAFL_USE_API_GATEWAY" == "1" ]]; then
       docker_args+=(--network "$CHATAFL_DOCKER_NETWORK")
@@ -210,14 +216,31 @@ for i in $(seq 1 $RUNS); do
       --env "CHATAFL_URL=${CHATAFL_URL_EFFECTIVE}"
     )
     if [[ -n "${CHATAFL_API_KEY_FILE:-}" ]]; then
+      chatafl_image_user=$(docker image inspect "$DOCIMAGE" \
+        --format '{{.Config.User}}' 2>/dev/null || true)
+      if [[ -z "$chatafl_image_user" ]]; then
+        chatafl_image_user=ubuntu
+      fi
       docker_args+=(
-        --mount "type=bind,src=${CHATAFL_API_KEY_FILE},dst=/run/secrets/chatafl_api_key,readonly"
+        --user root
+        --mount "type=bind,src=${CHATAFL_API_KEY_FILE},dst=/run/secrets/chatafl_api_key.host,readonly"
         --env "CHATAFL_API_KEY_FILE=/run/secrets/chatafl_api_key"
       )
+      container_command='set -eu
+target_user="$1"
+target_uid=$(id -u "$target_user")
+target_gid=$(id -g "$target_user")
+install -o "$target_uid" -g "$target_gid" -m 600 \
+  /run/secrets/chatafl_api_key.host /run/secrets/chatafl_api_key
+if [ "$target_uid" = 0 ]; then
+  exec /bin/bash -c "$2"
+fi
+exec runuser -u "$target_user" -- /bin/bash -c "$2"'
+      container_command_args=(-- "$chatafl_image_user" "$run_command")
     fi
   fi
   id=$(docker "${docker_args[@]}" "$DOCIMAGE" /bin/bash -c \
-    "cd ${WORKDIR} && run ${FUZZER} ${OUTDIR} '${OPTIONS}' ${TIMEOUT} ${SKIPCOUNT}")
+    "$container_command" "${container_command_args[@]}")
   cids+=("${id::12}") #store only the first 12 characters of a container ID
   record_manifest \
     --manifest "$MANIFEST_PATH" --event started \

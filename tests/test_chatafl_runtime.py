@@ -496,10 +496,13 @@ class ChatAflRuntimeIntegrationTests(unittest.TestCase):
             self.assertIn(
                 (
                     f"type=bind,src={api_key_file},"
-                    "dst=/run/secrets/chatafl_api_key,readonly"
+                    "dst=/run/secrets/chatafl_api_key.host,readonly"
                 ),
                 run_command,
             )
+            self.assertIn("--user", run_command)
+            self.assertIn("root", run_command)
+            self.assertIn("secret_staging=container_root_copy", metadata)
 
     def test_only_chatafl_containers_receive_runtime_binary_and_model(
         self,
@@ -524,9 +527,10 @@ class ChatAflRuntimeIntegrationTests(unittest.TestCase):
             executor,
         )
         self.assertIn(
-            "dst=/run/secrets/chatafl_api_key,readonly",
+            "dst=/run/secrets/chatafl_api_key.host,readonly",
             executor,
         )
+        self.assertIn("container_root_copy", executor)
         self.assertIn('docker "${docker_args[@]}"', executor)
         self.assertIn("chatafl_runtime_metadata.txt", executor)
 
@@ -544,6 +548,7 @@ class ChatAflRuntimeIntegrationTests(unittest.TestCase):
         self.assertIn("chatafl_model=%s", runner)
         self.assertIn("chatafl_url=%s", runner)
         self.assertIn("chatafl_api_key_source=%s", runner)
+        self.assertIn("chatafl_secret_staging=%s", runner)
         self.assertIn("chatafl_runtime_binary_sha256=%s", runner)
         self.assertIn("chatafl_runtime_source_sha256=%s", runner)
         self.assertIn("chatafl_runtime_builder_image_id=%s", runner)
