@@ -86,10 +86,22 @@ class VoltronOrchestrationTests(unittest.TestCase):
             )
             self.assertEqual(snapshot, Path(second.stdout.strip()))
             self.assertTrue((snapshot / ".benchmark-ready").is_file())
+            self.assertEqual(snapshot.stat().st_mode & 0o777, 0o755)
             self.assertTrue((snapshot / "config" / "configs.yaml").is_file())
             self.assertTrue(
                 (snapshot / "voltron" / "synthesizer" / "synthesizer.py").is_file()
             )
+
+            snapshot.chmod(0o700)
+            third = subprocess.run(
+                ["bash", str(prepare)],
+                text=True,
+                capture_output=True,
+                check=True,
+                env=environment,
+            )
+            self.assertEqual(snapshot, Path(third.stdout.strip()))
+            self.assertEqual(snapshot.stat().st_mode & 0o777, 0o755)
 
     def test_run_voltron_propagates_failed_container_status(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

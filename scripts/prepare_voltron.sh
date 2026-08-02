@@ -68,11 +68,19 @@ if ! snapshot_is_ready "$SNAPSHOT"; then
       "$COMMIT" >&2
     exit 1
   fi
+  # mktemp creates the snapshot root as 0700.  The snapshot is bind-mounted
+  # into benchmark containers that commonly run as the unprivileged ubuntu
+  # user, so that mode makes the otherwise valid source tree unreadable.
+  chmod 0755 "$TEMP"
   sed -i 's|^  api_key:.*|  api_key: <set-with-VOLTRON_LLM_API_KEY>|' \
     "$TEMP/config/configs.yaml"
   touch "$TEMP/.benchmark-ready"
   mv "$TEMP" "$SNAPSHOT"
 fi
+
+# Repair snapshots published by older versions of this script, whose mktemp
+# root kept mode 0700 and could not be read by the ubuntu user in containers.
+chmod 0755 "$SNAPSHOT"
 
 if ! snapshot_is_ready "$SNAPSHOT"; then
   printf 'Voltron snapshot is incomplete after preparation: %s\n' \
