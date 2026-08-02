@@ -74,6 +74,7 @@ if ! snapshot_is_ready "$SNAPSHOT"; then
   chmod 0755 "$TEMP"
   sed -i 's|^  api_key:.*|  api_key: <set-with-VOLTRON_LLM_API_KEY>|' \
     "$TEMP/config/configs.yaml"
+  printf '%s\n' "$COMMIT" > "$TEMP/.benchmark-voltron-commit"
   touch "$TEMP/.benchmark-ready"
   mv "$TEMP" "$SNAPSHOT"
 fi
@@ -81,6 +82,12 @@ fi
 # Repair snapshots published by older versions of this script, whose mktemp
 # root kept mode 0700 and could not be read by the ubuntu user in containers.
 chmod 0755 "$SNAPSHOT"
+
+# Older prepared snapshots predate the commit marker.  The object ID is
+# already known here, so repair the metadata without rebuilding the snapshot.
+if [ ! -s "$SNAPSHOT/.benchmark-voltron-commit" ]; then
+  printf '%s\n' "$COMMIT" > "$SNAPSHOT/.benchmark-voltron-commit"
+fi
 
 if ! snapshot_is_ready "$SNAPSHOT"; then
   printf 'Voltron snapshot is incomplete after preparation: %s\n' \

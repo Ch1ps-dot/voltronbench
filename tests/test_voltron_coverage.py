@@ -165,6 +165,11 @@ class VoltronCoverageExportTests(unittest.TestCase):
             container_runner,
         )
         self.assertIn("postprocess_status.json", container_runner)
+        self.assertIn("voltron_lifecycle_preflight", container_runner)
+        self.assertIn("INCOMPATIBLE_VOLTRON_SNAPSHOT", container_runner)
+        self.assertIn("VOLTRON_SOURCE_COMMIT", container_runner)
+        self.assertIn("lifecycle_mode", container_runner)
+        self.assertIn("check_forked_daapd_dependencies", coverage_runner)
         self.assertIn('"pair_status": "AVAILABLE"', container_runner)
         self.assertIn('set_stage "PACKAGING 3/4: creating archive"', container_runner)
         self.assertIn('set_stage "ARCHIVE READY 4/4"', container_runner)

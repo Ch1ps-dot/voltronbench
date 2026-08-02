@@ -24,6 +24,9 @@ mkdir -p "$VOLTRON_DIR"
 cp -a "$VOLTRON_SOURCE/." "$VOLTRON_DIR/"
 cd "$VOLTRON_DIR"
 
+VOLTRON_SOURCE_COMMIT=$(cat "$VOLTRON_SOURCE/.benchmark-voltron-commit" 2>/dev/null || printf 'unknown')
+VOLTRON_LIFECYCLE_MODE=unsupported
+
 for required_file in \
   pyproject.toml \
   cli.py \
@@ -36,6 +39,43 @@ for required_file in \
   fi
 done
 
+voltron_lifecycle_preflight() {
+  local executor=voltron/executor/executor.py
+  local config=config/configs.yaml
+
+  if ! grep -Fq 'def initialize_environment' "$executor" \
+    || ! grep -Fq 'def run_subject_readiness' "$executor" \
+    || ! grep -Fq 'readiness_script' voltron/configs.py; then
+    printf 'VOLTRON: INCOMPATIBLE_VOLTRON_SNAPSHOT; lifecycle readiness support is missing\n' >&2
+    return 1
+  fi
+
+  case "$VOLTRON_TARGET" in
+    forked-daapd)
+      if ! grep -Fq 'readiness_script: ready.sh' "$config" \
+        || [ ! -x "config/subjects/forked-daapd/ready.sh" ]; then
+        printf 'VOLTRON: forked-daapd readiness configuration is missing\n' >&2
+        return 1
+      fi
+      VOLTRON_LIFECYCLE_MODE=environment_once+daap_readiness
+      ;;
+    proftpd)
+      if ! grep -Fq 'readiness_adapter: ftp_banner_active_socket' "$config"; then
+        printf 'VOLTRON: ProFTPD readiness adapter is missing\n' >&2
+        return 1
+      fi
+      VOLTRON_LIFECYCLE_MODE=environment_once+ftp_banner_readiness
+      ;;
+    *)
+      VOLTRON_LIFECYCLE_MODE=environment_once+socket_readiness
+      ;;
+  esac
+}
+
+if ! voltron_lifecycle_preflight; then
+  exit 2
+fi
+
 apply_subject_overrides() {
   local source_dir="/opt/voltron-subject-overrides/${TARGET}"
   local destination_dir="config/subjects/${VOLTRON_TARGET}"
@@ -47,6 +87,14 @@ apply_subject_overrides() {
       "$destination_dir" >&2
     return 1
   }
+
+  # The hardened Voltron snapshot owns lifecycle scripts for these targets.
+  # Do not overwrite them with an older bench fallback once the capability
+  # preflight has passed.
+  if [[ "$TARGET" == forked-daapd || "$TARGET" == proftpd ]]; then
+    printf 'VOLTRON: using snapshot lifecycle scripts for %s\n' "$TARGET"
+    return 0
+  fi
 
   for source_file in "$source_dir"/*.sh; do
     [ -e "$source_file" ] || continue
@@ -271,7 +319,9 @@ write_postprocess_status() {
     "$COMPLIANCE_STATUS" \
     "$COVERAGE_STATE" \
     "$COVERAGE_STATUS" \
-    "$COMPONENT_EXPORT_STATUS" <<'PY'
+    "$COMPONENT_EXPORT_STATUS" \
+    "$VOLTRON_SOURCE_COMMIT" \
+    "$VOLTRON_LIFECYCLE_MODE" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -285,6 +335,8 @@ from pathlib import Path
     coverage_state,
     coverage_status,
     component_export_status,
+    voltron_source_commit,
+    lifecycle_mode,
 ) = sys.argv[1:]
 payload = {
     "voltron_status": int(voltron_status),
@@ -296,6 +348,8 @@ payload = {
     "coverage_exit_code": int(coverage_status),
     "component_export_status": "COMPLETED"
     if int(component_export_status) == 0 else "PARTIAL",
+    "voltron_source_commit": voltron_source_commit,
+    "lifecycle_mode": lifecycle_mode,
 }
 target = Path(output_path)
 temporary = target.with_suffix(target.suffix + ".tmp")

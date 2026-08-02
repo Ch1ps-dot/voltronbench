@@ -86,6 +86,14 @@ class VoltronOrchestrationTests(unittest.TestCase):
             )
             self.assertEqual(snapshot, Path(second.stdout.strip()))
             self.assertTrue((snapshot / ".benchmark-ready").is_file())
+            self.assertEqual(
+                (snapshot / ".benchmark-voltron-commit").read_text().strip(),
+                subprocess.check_output(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=source,
+                    text=True,
+                ).strip(),
+            )
             self.assertEqual(snapshot.stat().st_mode & 0o777, 0o755)
             self.assertTrue((snapshot / "config" / "configs.yaml").is_file())
             self.assertTrue(

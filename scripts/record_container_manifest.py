@@ -121,6 +121,8 @@ def main() -> int:
             "coverage_status",
             "coverage_exit_code",
             "component_export_status",
+            "voltron_source_commit",
+            "lifecycle_mode",
         ):
             if key in stage_status:
                 record[key] = stage_status[key]

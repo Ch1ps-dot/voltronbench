@@ -13,6 +13,18 @@ write_empty_coverage() {
     printf 'Time,l_per,l_abs,b_per,b_abs\n' > "$COVFILE"
 }
 
+check_forked_daapd_dependencies() {
+    if [[ ! -S /run/dbus/system_bus_socket ]] \
+        || ! pgrep -x dbus-daemon >/dev/null 2>&1 \
+        || ! pgrep -x avahi-daemon >/dev/null 2>&1; then
+        echo "VOLTRON coverage: forked-daapd dependencies are not ready" >&2
+        echo "dbus socket: $([[ -S /run/dbus/system_bus_socket ]] && echo present || echo missing)" >&2
+        pgrep -a dbus-daemon >&2 || true
+        pgrep -a avahi-daemon >&2 || true
+        return 1
+    fi
+}
+
 if [[ ! "$SKIPCOUNT" =~ ^[1-9][0-9]*$ ]]; then
     echo "VOLTRON coverage: invalid SKIPCOUNT: $SKIPCOUNT" >&2
     exit 2
@@ -53,8 +65,7 @@ case "$TARGET" in
     forked-daapd)
         COVERAGE_DIR="$WORKDIR"
         PORT=3689
-        sudo /etc/init.d/dbus start > /dev/null 2>&1 || true
-        sudo /etc/init.d/avahi-daemon start > /dev/null 2>&1 || true
+        check_forked_daapd_dependencies || exit 1
         ;;
     pure-ftpd)
         COVERAGE_DIR="$WORKDIR/pure-ftpd-gcov"

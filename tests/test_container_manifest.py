@@ -28,6 +28,8 @@ class ContainerManifestTests(unittest.TestCase):
                     "compliance_exit_code": 3,
                     "coverage_status": "COMPLETED",
                     "coverage_exit_code": 0,
+                    "voltron_source_commit": "abc123",
+                    "lifecycle_mode": "environment_once+ftp_banner_readiness",
                 }
             ).encode()
             with tarfile.open(archive, "w:gz") as output:
@@ -38,6 +40,10 @@ class ContainerManifestTests(unittest.TestCase):
             self.assertEqual(
                 MODULE.read_postprocess_status(archive)["compliance_status"],
                 "NO_COMPLIANCE_INPUT",
+            )
+            self.assertEqual(
+                MODULE.read_postprocess_status(archive)["lifecycle_mode"],
+                "environment_once+ftp_banner_readiness",
             )
 
     def test_missing_or_invalid_status_is_empty(self) -> None:
