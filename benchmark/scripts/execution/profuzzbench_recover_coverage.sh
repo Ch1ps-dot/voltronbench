@@ -165,10 +165,18 @@ rm -rf "$RAW/cov_html"
 render_html() {
   local gcov_dir=$1
   shift
-  cd "$gcov_dir"
-  gcovr "$@" --html --html-details -o index.html
-  mkdir -p "$RAW/cov_html"
-  cp ./*.html "$RAW/cov_html/"
+  (
+    cd "$gcov_dir"
+    gcovr "$@" --html --html-details -o index.html
+    mkdir -p "$RAW/cov_html"
+    cp ./*.html "$RAW/cov_html/"
+  )
+}
+
+render_html_or_note() {
+  if ! render_html "$@"; then
+    echo "coverage HTML was not produced; retaining valid CSV evidence" >&2
+  fi
 }
 
 case "$TARGET" in
@@ -179,50 +187,50 @@ case "$TARGET" in
     for f in BasicUsageEnvironment liveMedia groupsock UsageEnvironment; do
       cp "$f/include/"*.hh "$f/"
     done
-    render_html "$W/live-gcov/testProgs" -r ..
+    render_html_or_note "$W/live-gcov/testProgs" -r ..
     ;;
   kamailio)
     cd "$W"
     cov_script "$RAW" 5060 "$SKIPCOUNT" "$RAW/cov_over_time.csv" 1
-    render_html "$W/kamailio-gcov" -r .
+    render_html_or_note "$W/kamailio-gcov" -r .
     ;;
   exim)
     cd "$W/exim-gcov"
     cp ./src/build-Linux-x86_64/exim /usr/exim/bin/exim
     cov_script "$RAW" 25 "$SKIPCOUNT" "$RAW/cov_over_time.csv" 1
-    render_html "$W/exim-gcov" -r .
+    render_html_or_note "$W/exim-gcov" -r .
     ;;
   forked-daapd)
     /etc/init.d/dbus start
     /etc/init.d/avahi-daemon start
     cd "$W"
     cov_script "$RAW" 3689 "$SKIPCOUNT" "$RAW/cov_over_time.csv" 1
-    render_html "$W/forked-daapd-gcov" -r .
+    render_html_or_note "$W/forked-daapd-gcov" -r .
     ;;
   pure-ftpd)
     cd "$W/pure-ftpd-gcov"
     cov_script "$RAW" 21 "$SKIPCOUNT" "$RAW/cov_over_time.csv" 1
-    render_html "$W/pure-ftpd-gcov" -r .
+    render_html_or_note "$W/pure-ftpd-gcov" -r .
     ;;
   proftpd)
     cd "$W/proftpd-gcov"
     cov_script "$RAW" 21 "$SKIPCOUNT" "$RAW/cov_over_time.csv" 1
-    render_html "$W/proftpd-gcov" -r .
+    render_html_or_note "$W/proftpd-gcov" -r .
     ;;
   bftpd)
     cd "$W/bftpd-gcov"
     cov_script "$RAW" 21 "$SKIPCOUNT" "$RAW/cov_over_time.csv" 1
-    render_html "$W/bftpd-gcov" -r .
+    render_html_or_note "$W/bftpd-gcov" -r .
     ;;
   lightftp)
     cd "$W/LightFTP-gcov/Source/Release"
     cov_script "$RAW" 2200 "$SKIPCOUNT" "$RAW/cov_over_time.csv" 1
-    render_html "$W/LightFTP-gcov/Source/Release" -r ..
+    render_html_or_note "$W/LightFTP-gcov/Source/Release" -r ..
     ;;
   lighttpd1)
     cd "$W/lighttpd1-gcov"
     cov_script "$RAW" 8080 "$SKIPCOUNT" "$RAW/cov_over_time.csv" 1
-    render_html "$W/lighttpd1-gcov" -r .. --exclude 'src/t/'
+    render_html_or_note "$W/lighttpd1-gcov" -r .. --exclude 'src/t/'
     ;;
   *)
     echo "unsupported target: $TARGET" >&2
@@ -243,10 +251,6 @@ if ! awk -F, '
   echo "coverage CSV has no valid timestamped sample" >&2
   exit 23
 fi
-[[ -f "$RAW/cov_html/index.html" ]] || {
-  echo "coverage HTML index was not produced" >&2
-  exit 24
-}
 EOS
 }
 
@@ -254,6 +258,7 @@ recover_one() {
   local source_id=$1
   local state image_id image_ref command outdir fuzzer target target_dir raw_path
   local case_dir snapshot_dir snapshot_path recovered_dir collector_id csv_path html_path relative_raw_path
+  local csv_valid=0 html_available=0
   local status=0
 
   docker inspect "$source_id" >/dev/null 2>&1 || die "container not found: $source_id"
@@ -344,15 +349,17 @@ recover_one() {
   local recovered_path="$recovered_dir/$relative_raw_path"
   csv_path="$recovered_path/cov_over_time.csv"
   html_path="$recovered_path/cov_html/index.html"
-  if [[ ! -s "$csv_path" || ! -f "$html_path" ]] \
-    || ! awk -F, '
+  if [[ -s "$csv_path" ]] && awk -F, '
       NR > 1 && NF == 5 && $1 ~ /^[0-9]+$/ &&
       $2 ~ /^[0-9.]+$/ && $3 ~ /^[0-9.]+$/ &&
       $4 ~ /^[0-9.]+$/ && $5 ~ /^[0-9.]+$/ { found = 1 }
       END { exit !found }
     ' "$csv_path"; then
+    csv_valid=1
+  else
     status=1
   fi
+  [[ -f "$html_path" ]] && html_available=1
 
   {
     printf 'source_container_id=%s\n' "$source_id"
@@ -362,6 +369,8 @@ recover_one() {
     printf 'fuzzer=%s\n' "$fuzzer"
     printf 'outdir=%s\n' "$outdir"
     printf 'raw_path=%s\n' "$raw_path"
+    printf 'coverage_csv=%s\n' "$csv_valid"
+    printf 'coverage_html=%s\n' "$html_available"
     printf 'skipcount=%s\n' "$SKIPCOUNT"
     printf 'replay_timeout_seconds=%s\n' "$REPLAY_TIMEOUT"
     printf 'recovery_status=%s\n' "$([[ "$status" == 0 ]] && echo complete || echo failed)"
