@@ -24,6 +24,18 @@ mkdir -p "$VOLTRON_DIR"
 cp -a "$VOLTRON_SOURCE/." "$VOLTRON_DIR/"
 cd "$VOLTRON_DIR"
 
+for required_file in \
+  pyproject.toml \
+  cli.py \
+  config/configs.yaml \
+  voltron/synthesizer/synthesizer.py; do
+  if [ ! -f "$required_file" ]; then
+    printf 'VOLTRON: prepared source is incomplete; missing %s\n' \
+      "$required_file" >&2
+    exit 2
+  fi
+done
+
 apply_subject_overrides() {
   local source_dir="/opt/voltron-subject-overrides/${TARGET}"
   local destination_dir="config/subjects/${VOLTRON_TARGET}"

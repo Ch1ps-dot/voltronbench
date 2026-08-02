@@ -29,6 +29,68 @@ def wait_for(predicate, timeout: float = 10.0) -> None:
 
 
 class VoltronOrchestrationTests(unittest.TestCase):
+    def test_prepare_voltron_rebuilds_incomplete_cached_snapshot(self) -> None:
+        prepare = PROJECT_ROOT / "scripts" / "prepare_voltron.sh"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            (source / "config").mkdir(parents=True)
+            (source / "voltron" / "synthesizer").mkdir(parents=True)
+            (source / "pyproject.toml").write_text("[project]\nname='test'\n")
+            (source / "cli.py").write_text("#!/usr/bin/env python3\n")
+            (source / "config" / "configs.yaml").write_text("  api_key: test\n")
+            (source / "voltron" / "synthesizer" / "synthesizer.py").write_text(
+                "# synthesizer\n"
+            )
+            subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+            subprocess.run(["git", "add", "."], cwd=source, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "-qm",
+                    "snapshot",
+                ],
+                cwd=source,
+                check=True,
+            )
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "VOLTRON_REPO": str(source),
+                    "VOLTRON_REF": "HEAD",
+                    "VOLTRON_CACHE_DIR": str(root / "cache"),
+                }
+            )
+
+            first = subprocess.run(
+                ["bash", str(prepare)],
+                text=True,
+                capture_output=True,
+                check=True,
+                env=environment,
+            )
+            snapshot = Path(first.stdout.strip())
+            (snapshot / "config" / "configs.yaml").unlink()
+
+            second = subprocess.run(
+                ["bash", str(prepare)],
+                text=True,
+                capture_output=True,
+                check=True,
+                env=environment,
+            )
+            self.assertEqual(snapshot, Path(second.stdout.strip()))
+            self.assertTrue((snapshot / ".benchmark-ready").is_file())
+            self.assertTrue((snapshot / "config" / "configs.yaml").is_file())
+            self.assertTrue(
+                (snapshot / "voltron" / "synthesizer" / "synthesizer.py").is_file()
+            )
+
     def test_run_voltron_propagates_failed_container_status(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
