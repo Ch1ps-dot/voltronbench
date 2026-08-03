@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REPO=${VOLTRON_REPO:-https://github.com/Ch1ps-dot/voltron.git}
 REF=${VOLTRON_REF:-main}
+SOURCE_IMAGE=${VOLTRON_SOURCE_IMAGE:-}
+SOURCE_IMAGE_PATH=${VOLTRON_SOURCE_IMAGE_PATH:-/opt/voltron-src}
 CACHE_ROOT=${VOLTRON_CACHE_DIR:-"$ROOT/.runtime/voltron"}
 MIRROR="$CACHE_ROOT/repository.git"
 SNAPSHOTS="$CACHE_ROOT/snapshots"
@@ -35,10 +37,61 @@ if [ -n "${VOLTRON_SOURCE_DIR:-}" ]; then
   exit 0
 fi
 
+if [ -n "$SOURCE_IMAGE" ]; then
+  case "$SOURCE_IMAGE_PATH" in
+    /*) ;;
+    *) printf 'VOLTRON_SOURCE_IMAGE_PATH must be absolute.\n' >&2; exit 2 ;;
+  esac
+  if [[ "$SOURCE_IMAGE" == *$'\n'* || "$SOURCE_IMAGE" == *$'\r'* \
+    || "$SOURCE_IMAGE_PATH" == *$'\n'* || "$SOURCE_IMAGE_PATH" == *$'\r'* ]]; then
+    printf 'VOLTRON_SOURCE_IMAGE and VOLTRON_SOURCE_IMAGE_PATH must not contain newlines.\n' >&2
+    exit 2
+  fi
+fi
+
 mkdir -p "$CACHE_ROOT" "$SNAPSHOTS"
 
 exec 9>"$CACHE_ROOT/prepare.lock"
 flock 9
+
+if [ -n "$SOURCE_IMAGE" ]; then
+  printf 'Preparing Voltron source from image %s...\n' "$SOURCE_IMAGE" >&2
+  docker pull "$SOURCE_IMAGE" >&2
+  IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$SOURCE_IMAGE")
+  IMAGE_KEY=${IMAGE_ID#sha256:}
+  SNAPSHOT="$SNAPSHOTS/image-$IMAGE_KEY"
+  if ! snapshot_is_ready "$SNAPSHOT"; then
+    if [ -e "$SNAPSHOT" ]; then
+      rm -rf "$SNAPSHOT"
+    fi
+    TEMP=$(mktemp -d "$SNAPSHOTS/.image-$IMAGE_KEY.XXXXXX")
+    CONTAINER=$(docker create "$SOURCE_IMAGE")
+    if ! docker cp "$CONTAINER:$SOURCE_IMAGE_PATH/." "$TEMP"; then
+      docker rm "$CONTAINER" >/dev/null 2>&1 || true
+      rm -rf "$TEMP"
+      printf 'Voltron source image is missing %s: %s\n' \
+        "$SOURCE_IMAGE_PATH" "$SOURCE_IMAGE" >&2
+      exit 1
+    fi
+    docker rm "$CONTAINER" >/dev/null 2>&1
+    if ! source_tree_is_complete "$TEMP"; then
+      rm -rf "$TEMP"
+      printf 'Voltron source image has an incomplete source tree: %s\n' \
+        "$SOURCE_IMAGE" >&2
+      exit 1
+    fi
+    chmod 0755 "$TEMP"
+    sed -i 's|^  api_key:.*|  api_key: <set-with-VOLTRON_LLM_API_KEY>|' \
+      "$TEMP/config/configs.yaml"
+    printf 'image:%s\n' "$IMAGE_ID" > "$TEMP/.benchmark-voltron-commit"
+    printf '%s\n' "$SOURCE_IMAGE" > "$TEMP/.benchmark-voltron-source-image"
+    touch "$TEMP/.benchmark-ready"
+    mv "$TEMP" "$SNAPSHOT"
+  fi
+  chmod 0755 "$SNAPSHOT"
+  printf '%s\n' "$SNAPSHOT"
+  exit 0
+fi
 
 if [ ! -d "$MIRROR" ]; then
   git clone --mirror "$REPO" "$MIRROR" >&2
