@@ -33,6 +33,15 @@ if $(strstr $FUZZER "afl") || $(strstr $FUZZER "llm"); then
 
   STATUS=$?
 
+  if [[ "$TARGET_DIR" == kamailio* ]]; then
+    "$WORKDIR/pjsua_lifecycle" stop >/dev/null 2>&1 || true
+    if [[ -d "$WORKDIR/${TARGET_DIR}/${OUTDIR}" \
+      && -f /tmp/kamailio-pjsua/lifecycle.log ]]; then
+      cp /tmp/kamailio-pjsua/lifecycle.log \
+        "$WORKDIR/${TARGET_DIR}/${OUTDIR}/kamailio-pjsua-lifecycle.log"
+    fi
+  fi
+
   #Step-2. Collect code coverage over time
   #Move to gcov folder
   cd $WORKDIR

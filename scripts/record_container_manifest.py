@@ -82,6 +82,7 @@ def main() -> int:
     metadata = inspect_container(args.container_id)
     state = metadata.get("State") or {}
     config = metadata.get("Config") or {}
+    host_config = metadata.get("HostConfig") or {}
     now = datetime.now(timezone.utc).isoformat()
     full_id = str(metadata.get("Id") or args.container_id)
     record = {
@@ -103,6 +104,7 @@ def main() -> int:
         "last_event": args.event,
         "recorded_at": now,
         "confidence": "direct",
+        "container_init": bool(host_config.get("Init") is True),
     }
     if args.exit_code is not None:
         record["exit_code"] = args.exit_code

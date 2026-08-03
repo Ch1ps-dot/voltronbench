@@ -36,7 +36,7 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
     def test_overrides_are_shell_valid_and_cover_failed_suts(self) -> None:
         expected = {
             "forked-daapd": {"setup.sh", "run.sh"},
-            "kamailio": {"run.sh"},
+            "kamailio": {"setup.sh", "run.sh", "pjsua_lifecycle.sh"},
             "lightftp": {"setup.sh", "run.sh"},
             "pure-ftpd": {"setup.sh"},
         }

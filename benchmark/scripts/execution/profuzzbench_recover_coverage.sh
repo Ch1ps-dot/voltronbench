@@ -317,12 +317,17 @@ recover_one() {
     return 1
   fi
 
-  collector_id=$(docker run -d \
-    --user root \
-    --label voltronbench.coverage-recovery=true \
-    --label "voltronbench.coverage-source=$source_id" \
-    --entrypoint /bin/bash "$image_id" \
-    -lc 'while :; do sleep 3600; done')
+  collector_args=(
+    run --init -d
+    --user root
+    --label voltronbench.coverage-recovery=true
+    --label "voltronbench.coverage-source=$source_id"
+  )
+  if [[ "$target" == "kamailio" ]]; then
+    collector_args+=(--env KAMAILIO_CONTAINER_INIT=enabled)
+  fi
+  collector_args+=(--entrypoint /bin/bash "$image_id" -lc 'while :; do sleep 3600; done')
+  collector_id=$(docker "${collector_args[@]}")
   printf '  collector: %s\n' "${collector_id:0:12}"
 
   cleanup_collector() {

@@ -243,7 +243,7 @@ for i in $(seq 1 "$RUNS"); do
   mkdir -p "$UV_CACHE"
   chmod 0777 "$UV_CACHE"
   docker_args=(
-    run --cpus=1 -d -it
+    run --init --cpus=1 -d -it
     --mount "type=bind,src=${VOLTRON_SOURCE},dst=/opt/voltron-src,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_voltron_container.sh,dst=/opt/voltron-benchmark-runner.sh,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-subject-overrides,dst=/opt/voltron-subject-overrides,readonly"
@@ -257,6 +257,9 @@ for i in $(seq 1 "$RUNS"); do
     -e UV_CACHE_DIR=/home/ubuntu/.cache/uv
     -e UV_PYTHON_INSTALL_DIR=/home/ubuntu/.cache/uv/python
   )
+  if [ "$TARGET" = "kamailio" ]; then
+    docker_args+=(--env KAMAILIO_CONTAINER_INIT=enabled)
+  fi
   if [ -n "${PROFUZZBENCH_RUN_ID:-}" ]; then
     docker_args+=(
       --label "voltronbench.run_id=${PROFUZZBENCH_RUN_ID}"

@@ -131,5 +131,7 @@ COPY --chown=ubuntu:ubuntu in-sip ${WORKDIR}/in-sip
 COPY --chown=ubuntu:ubuntu cov_script.sh ${WORKDIR}/cov_script
 COPY --chown=ubuntu:ubuntu run.sh ${WORKDIR}/run
 COPY --chown=ubuntu:ubuntu run_pjsip.sh ${WORKDIR}/run_pjsip
+COPY --chown=ubuntu:ubuntu pjsua_lifecycle.sh ${WORKDIR}/pjsua_lifecycle
+COPY --chown=ubuntu:ubuntu crash_script ${WORKDIR}/crash_script
 COPY --chown=ubuntu:ubuntu kamailio-basic.cfg ${WORKDIR}/kamailio-basic.cfg
 COPY --chown=ubuntu:ubuntu StarWars3.wav ${WORKDIR}/StarWars3.wav
