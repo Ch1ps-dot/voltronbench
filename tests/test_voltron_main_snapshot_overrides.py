@@ -1,4 +1,6 @@
 from pathlib import Path
+import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -35,6 +37,7 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
 
     def test_overrides_are_shell_valid_and_cover_failed_suts(self) -> None:
         expected = {
+            "exim": {"setup.sh"},
             "forked-daapd": {"setup.sh", "run.sh"},
             "kamailio": {"setup.sh", "run.sh", "pjsua_lifecycle.sh"},
             "lightftp": {"setup.sh", "run.sh"},
@@ -52,6 +55,67 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
                     check=False,
                 )
                 self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_exim_setup_is_idempotent_and_pid_scoped(self) -> None:
+        setup = EXECUTION_DIR / "voltron-subject-overrides" / "exim" / "setup.sh"
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pidfile = root / "exim.pid"
+            environment = {**os.environ, "EXIM_PIDFILE": str(pidfile)}
+
+            for contents in (None, "", "not-a-pid\n", "999999999\n"):
+                if contents is None:
+                    pidfile.unlink(missing_ok=True)
+                else:
+                    pidfile.write_text(contents, encoding="utf-8")
+                completed = subprocess.run(
+                    [str(setup)],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertFalse(pidfile.exists())
+
+            foreign = subprocess.Popen(["sleep", "60"])
+            try:
+                pidfile.write_text(f"{foreign.pid}\n", encoding="utf-8")
+                completed = subprocess.run(
+                    [str(setup)],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertIsNone(foreign.poll())
+                self.assertFalse(pidfile.exists())
+            finally:
+                foreign.terminate()
+                foreign.wait(timeout=5)
+
+            exim = root / "exim"
+            shutil.copy2("/bin/sleep", exim)
+            exim.chmod(0o755)
+            target = subprocess.Popen([str(exim), "60"])
+            try:
+                pidfile.write_text(f"{target.pid}\n", encoding="utf-8")
+                completed = subprocess.run(
+                    [str(setup)],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                target.wait(timeout=5)
+                self.assertFalse(pidfile.exists())
+            finally:
+                if target.poll() is None:
+                    target.kill()
+                    target.wait(timeout=5)
 
     def test_runner_applies_overrides_and_main_retry_patch(self) -> None:
         host_runner = (PROJECT_ROOT / "run_voltron.sh").read_text(
