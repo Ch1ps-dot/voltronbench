@@ -1,0 +1,6 @@
+# Host-side dependencies for result analysis and the live Docker dashboard.
+# Keep these separate from requirements-gateway.txt: the gateway runs in its
+# own container, while analyze.sh and the monitor run on the host.
+pandas>=1.5,<3
+matplotlib>=3.6,<4
+rich>=13,<15
