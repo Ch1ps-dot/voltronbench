@@ -16,6 +16,72 @@ source "$ROOT/benchmark/scripts/execution/profuzzbench_monitor_common.sh"
 
 MANIFEST_PATH="${PROFUZZBENCH_CONTAINER_MANIFEST:-${RESULTS_ROOT:-$SAVETO/..}/container-manifest.jsonl}"
 MANIFEST_RUN_ID="${PROFUZZBENCH_RUN_ID:-unknown}"
+DOCKER_DIAGNOSTICS_DIR="${PROFUZZBENCH_DOCKER_DIAGNOSTICS_DIR:-$SAVETO/docker}"
+DOCKER_DIAGNOSTICS_FILE="$DOCKER_DIAGNOSTICS_DIR/diagnostics.jsonl"
+DOCKER_EVENTS_PID=""
+mkdir -p "$DOCKER_DIAGNOSTICS_DIR/inspect" "$DOCKER_DIAGNOSTICS_DIR/logs" \
+  "$DOCKER_DIAGNOSTICS_DIR/events"
+
+write_docker_diagnostic() {
+  python3 "$ROOT/scripts/write_docker_diagnostic.py" \
+    --output "$DOCKER_DIAGNOSTICS_FILE" \
+    --kind "$1" --target "$TARGET" --replication "$2" \
+    "${@:3}" >/dev/null 2>&1 || true
+}
+
+stop_docker_event_collector() {
+  if [ -n "$DOCKER_EVENTS_PID" ]; then
+    kill "$DOCKER_EVENTS_PID" 2>/dev/null || true
+    wait "$DOCKER_EVENTS_PID" 2>/dev/null || true
+    DOCKER_EVENTS_PID=""
+  fi
+}
+
+start_docker_event_collector() {
+  local event_file="$DOCKER_DIAGNOSTICS_DIR/events/${TARGET}.jsonl"
+  local event_error="$DOCKER_DIAGNOSTICS_DIR/events/${TARGET}.stderr.log"
+
+  if [ -z "${PROFUZZBENCH_RUN_ID:-}" ]; then
+    return 0
+  fi
+  docker events --format '{{json .}}' \
+    --filter "label=voltronbench.run_id=${PROFUZZBENCH_RUN_ID}" \
+    >"$event_file" 2>"$event_error" &
+  DOCKER_EVENTS_PID=$!
+  write_docker_diagnostic events_started 0 \
+    --status "$event_file"
+}
+
+capture_container_diagnostics() {
+  local id=$1
+  local index=$2
+  local inspect_file="$DOCKER_DIAGNOSTICS_DIR/inspect/${TARGET}-${index}.json"
+  local log_file="$DOCKER_DIAGNOSTICS_DIR/logs/${TARGET}-${index}.log"
+
+  # The helper removes Config.Env and other credential-bearing fields before
+  # writing inspect output. Container logs are intentionally kept separate.
+  if docker inspect "$id" 2>"$inspect_file.stderr" \
+    | python3 "$ROOT/scripts/sanitize_docker_inspect.py" >"$inspect_file"; then
+    rm -f "$inspect_file.stderr"
+  fi
+  raw_log="${log_file}.raw"
+  docker logs --timestamps "$id" >"$raw_log" 2>&1 || true
+  max_log_bytes=${PROFUZZBENCH_DOCKER_LOG_MAX_BYTES:-10485760}
+  case "$max_log_bytes" in
+    ''|*[!0-9]*) max_log_bytes=10485760 ;;
+  esac
+  if [ "$(wc -c <"$raw_log")" -gt "$max_log_bytes" ]; then
+    half=$((max_log_bytes / 2))
+    head -c "$half" "$raw_log" >"$log_file"
+    printf '\n[... docker log truncated ...]\n' >>"$log_file"
+    tail -c "$half" "$raw_log" >>"$log_file"
+    rm -f "$raw_log"
+  else
+    mv "$raw_log" "$log_file"
+  fi
+  write_docker_diagnostic container_diagnostics "$index" \
+    --container-id "$id" --status "$inspect_file"
+}
 
 record_manifest() {
   python3 "$ROOT/scripts/record_container_manifest.py" "$@" \
@@ -123,6 +189,7 @@ handle_interrupt() {
   printf "\nVOLTRON: Interrupt received. Cleaning up...\n"
   write_monitor_progress "Interrupted; stopping containers"
   stop_container_waiter
+  stop_docker_event_collector
   profuzzbench_stop_monitor "$MONITOR_PID"
   profuzzbench_interrupt_containers "${cids[@]}"
   if [ "$PROFUZZBENCH_EXTERNAL_MONITOR" != "1" ]; then
@@ -229,6 +296,8 @@ if [ "$VOLTRON_USE_API_GATEWAY" != "1" ]; then
   load_llm_profiles
 fi
 
+start_docker_event_collector
+
 for i in $(seq 1 "$RUNS"); do
   # uv mutates its cache while installing dependencies.  A shared bind mount
   # is unsafe for parallel targets: one container can leave root-owned cache
@@ -292,8 +361,23 @@ for i in $(seq 1 "$RUNS"); do
     )
   fi
 
+  stderr_file="$DOCKER_DIAGNOSTICS_DIR/${TARGET}-${i}.docker-run.stderr.log"
+  printf -v command_summary '%q ' docker "${docker_args[@]}" "$DOCIMAGE" /bin/bash \
+    /opt/voltron-benchmark-runner.sh "$TARGET" "$OUTDIR" "$TIMEOUT" "$SKIPCOUNT"
   id=$(docker "${docker_args[@]}" "$DOCIMAGE" /bin/bash \
-    /opt/voltron-benchmark-runner.sh "$TARGET" "$OUTDIR" "$TIMEOUT" "$SKIPCOUNT")
+    /opt/voltron-benchmark-runner.sh "$TARGET" "$OUTDIR" "$TIMEOUT" "$SKIPCOUNT" \
+    2>"$stderr_file")
+  docker_rc=$?
+  write_docker_diagnostic create_finished "$i" \
+    --returncode "$docker_rc" --container-id "$id" \
+    --stderr "$stderr_file" --command "$command_summary"
+  if [ "$docker_rc" -ne 0 ] || [ -z "$id" ]; then
+    printf '\nVOLTRON: docker run failed for %s replication %s (rc=%s); stderr: %s\n' \
+      "$TARGET" "$i" "$docker_rc" "$stderr_file" >&2
+    cat "$stderr_file" >&2
+    stop_docker_event_collector
+    exit 125
+  fi
   cids+=("${id::12}")
   record_manifest \
     --manifest "$MANIFEST_PATH" --event started \
@@ -348,9 +432,13 @@ fi
 remove_wait_status_file
 
 write_monitor_progress "Fuzzing finished; preparing archive collection"
+for index in "${!cids[@]}"; do
+  capture_container_diagnostics "${cids[$index]}" "$((index + 1))"
+done
 if ! collect_results; then
   CONTAINER_STATUS=1
 fi
+stop_docker_event_collector
 profuzzbench_stop_monitor "$MONITOR_PID"
 if [ "$PROFUZZBENCH_EXTERNAL_MONITOR" != "1" ]; then
   profuzzbench_print_final_container_summary "$LABEL" "$TIMEOUT" "${cids[@]}"
