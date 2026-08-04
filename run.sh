@@ -159,7 +159,15 @@ prepare_stateafl_kernel_settings() {
     fi
 }
 
+check_analysis_dependencies() {
+    if ! python3 "$PROJECT_ROOT/scripts/check_analysis_dependencies.py"; then
+        echo "Cannot start an experiment without host analysis dependencies." >&2
+        exit 1
+    fi
+}
+
 trap cleanup_run_environment EXIT
+check_analysis_dependencies
 prepare_stateafl_kernel_settings
 
 uses_chatafl=0
