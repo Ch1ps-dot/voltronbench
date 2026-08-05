@@ -5,7 +5,8 @@ export TIMEOUT="${TIMEOUT:-86400}"
 export SKIPCOUNT="${SKIPCOUNT:-5}"
 export TEST_TIMEOUT="${TEST_TIMEOUT:-20000}"
 export FORKED_DAAPD_STARTUP_WAIT_US="${FORKED_DAAPD_STARTUP_WAIT_US:-1000000}"
-export FORKED_DAAPD_MIN_TEST_TIMEOUT_MS="${FORKED_DAAPD_MIN_TEST_TIMEOUT_MS:-3000}"
+export FORKED_DAAPD_MIN_TEST_TIMEOUT_MS="${FORKED_DAAPD_MIN_TEST_TIMEOUT_MS:-20000}"
+export FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS="${FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS:-20}"
 
 for timeout_setting in \
     TEST_TIMEOUT \
@@ -17,6 +18,11 @@ for timeout_setting in \
         exit 2
     fi
 done
+
+if [[ ! "$FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
+    echo "FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS must be a non-negative integer." >&2
+    exit 2
+fi
 
 FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE=$TEST_TIMEOUT
 if (( FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE \
@@ -116,14 +122,19 @@ run_standard_target() {
     local result_dir="results-${target}"
     local out_dir="out-${target}-${fuzzer}"
     local options
+    local container_start_delay=0
 
     options=$(target_options "$target")
     if [[ "$fuzzer" == "stateafl" ]]; then
         image="${target}-stateafl-vol"
         options="${options} $(stateafl_vanilla_options "$target")"
+        if [[ "$target" == "forked-daapd" ]]; then
+            container_start_delay=$FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS
+        fi
     fi
 
     mkdir -p "$RESULTS_ROOT/$result_dir"
+    PROFUZZBENCH_CONTAINER_START_DELAY_SECONDS=$container_start_delay \
     profuzzbench_exec_common.sh \
         "$image" \
         "$NUM_CONTAINERS" \
@@ -261,6 +272,7 @@ echo "# SKIPCOUNT: ${SKIPCOUNT}"
 echo "# TEST TIMEOUT: ${TEST_TIMEOUT} ms"
 echo "# FORKED-DAAPD STARTUP WAIT: ${FORKED_DAAPD_STARTUP_WAIT_US} us"
 echo "# FORKED-DAAPD TEST TIMEOUT: ${FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE} ms"
+echo "# FORKED-DAAPD CONTAINER START DELAY: ${FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS} s"
 echo "# TARGET LIST: ${targets}"
 echo "# FUZZER LIST: ${fuzzers}"
 echo "# RESULTS ROOT: ${RESULTS_ROOT}"

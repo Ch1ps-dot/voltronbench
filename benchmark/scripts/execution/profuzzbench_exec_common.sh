@@ -200,6 +200,12 @@ handle_interrupt() {
 
 trap handle_interrupt INT TERM
 
+PROFUZZBENCH_CONTAINER_START_DELAY_SECONDS=${PROFUZZBENCH_CONTAINER_START_DELAY_SECONDS:-0}
+if [[ ! "$PROFUZZBENCH_CONTAINER_START_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "PROFUZZBENCH_CONTAINER_START_DELAY_SECONDS must be a non-negative integer." >&2
+  exit 2
+fi
+
 #create one container for each run
 for i in $(seq 1 $RUNS); do
   docker_args=(run --init --cpus=1 -d -it)
@@ -250,6 +256,12 @@ exec runuser -u "$target_user" -- /bin/bash -c "$2"'
     --run-id "$MANIFEST_RUN_ID" --target "$MANIFEST_TARGET" \
     --fuzzer "$FUZZER" --replication "$i" --container-id "${id::12}" \
     --result-dir "$SAVETO" --timeout-seconds "$TIMEOUT"
+  if [[ "$i" -lt "$RUNS" \
+      && "$PROFUZZBENCH_CONTAINER_START_DELAY_SECONDS" -gt 0 ]]; then
+    printf '\n%s: Delaying the next container start by %s seconds.' \
+      "${FUZZER^^}" "$PROFUZZBENCH_CONTAINER_START_DELAY_SECONDS"
+    sleep "$PROFUZZBENCH_CONTAINER_START_DELAY_SECONDS"
+  fi
 done
 
 dlist="" #docker list

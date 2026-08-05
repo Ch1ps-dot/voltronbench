@@ -46,4 +46,5 @@ RUN cd $WORKDIR && \
 COPY --chown=ubuntu:ubuntu in-daap-replay ${WORKDIR}/in-daap-replay
 COPY --chown=ubuntu:ubuntu run-stateafl.sh ${WORKDIR}/run-stateafl
 COPY --chown=ubuntu:ubuntu run.sh ${WORKDIR}/run
+COPY --chown=ubuntu:ubuntu preflight.sh ${WORKDIR}/forked-daapd-preflight
 COPY --chown=ubuntu:ubuntu cov_script.sh ${WORKDIR}/cov_script

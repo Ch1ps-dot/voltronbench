@@ -696,8 +696,11 @@ Remove copied fuzzer source trees from subject directories:
 - Forked-DAAPd uses a one-second server startup wait by default. Override it
   with `FORKED_DAAPD_STARTUP_WAIT_US`; its effective testcase timeout is
   `max(TEST_TIMEOUT, FORKED_DAAPD_MIN_TEST_TIMEOUT_MS)`, with a default minimum
-  of 3000 ms. These settings apply through the shared target options used by
-  AFLNet, ChatAFL, and StateAFL.
+  of 20000 ms. StateAFL runs also preflight the selected instrumented target,
+  require all initial seeds to survive calibration, and stagger container
+  starts by 20 seconds by default. Override the stagger with
+  `FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS`. These settings apply through
+  the shared target options used by AFLNet, ChatAFL, and StateAFL.
 - Voltron maps `pure-ftpd` to `pureftpd` and `lighttpd1` to `lighttpd` before
   invoking its CLI.
 
