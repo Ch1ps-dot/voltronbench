@@ -206,6 +206,14 @@ for i in $(seq 1 $RUNS); do
   run_command="cd ${WORKDIR} && run ${FUZZER} ${OUTDIR} '${OPTIONS}' ${TIMEOUT} ${SKIPCOUNT}"
   container_command="$run_command"
   container_command_args=()
+  if [[ "$FUZZER" == "stateafl" && "$DOCIMAGE" == "forked-daapd-stateafl-vol" ]]; then
+    docker_args+=(
+      --env "FORKED_DAAPD_PREFLIGHT_ATTEMPTS=${FORKED_DAAPD_PREFLIGHT_ATTEMPTS:-300}"
+      --env "FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS=${FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS:-0.1}"
+      --env "FORKED_DAAPD_PREFLIGHT_RESPONSE_TIMEOUT_SECONDS=${FORKED_DAAPD_PREFLIGHT_RESPONSE_TIMEOUT_SECONDS:-2}"
+    )
+  fi
+
   if [[ "$FUZZER" == "chatafl" ]]; then
     if [[ "$CHATAFL_USE_API_GATEWAY" == "1" ]]; then
       docker_args+=(--network "$CHATAFL_DOCKER_NETWORK")
@@ -214,6 +222,8 @@ for i in $(seq 1 $RUNS); do
       --mount "type=bind,src=${CHATAFL_RUNTIME_BINARY},dst=/home/ubuntu/chatafl/afl-fuzz,readonly"
       --env "CHATAFL_MODEL=${CHATAFL_MODEL_EFFECTIVE}"
       --env "CHATAFL_URL=${CHATAFL_URL_EFFECTIVE}"
+      --env "CHATAFL_LLM_CONNECT_TIMEOUT_MS=${CHATAFL_LLM_CONNECT_TIMEOUT_MS:-10000}"
+      --env "CHATAFL_LLM_REQUEST_TIMEOUT_MS=${CHATAFL_LLM_REQUEST_TIMEOUT_MS:-330000}"
     )
     if [[ -n "${CHATAFL_API_KEY_FILE:-}" ]]; then
       chatafl_image_user=$(docker image inspect "$DOCIMAGE" \

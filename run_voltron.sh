@@ -16,6 +16,72 @@ source "$ROOT/benchmark/scripts/execution/profuzzbench_monitor_common.sh"
 
 MANIFEST_PATH="${PROFUZZBENCH_CONTAINER_MANIFEST:-${RESULTS_ROOT:-$SAVETO/..}/container-manifest.jsonl}"
 MANIFEST_RUN_ID="${PROFUZZBENCH_RUN_ID:-unknown}"
+DOCKER_DIAGNOSTICS_DIR="${PROFUZZBENCH_DOCKER_DIAGNOSTICS_DIR:-$SAVETO/docker}"
+DOCKER_DIAGNOSTICS_FILE="$DOCKER_DIAGNOSTICS_DIR/diagnostics.jsonl"
+DOCKER_EVENTS_PID=""
+mkdir -p "$DOCKER_DIAGNOSTICS_DIR/inspect" "$DOCKER_DIAGNOSTICS_DIR/logs" \
+  "$DOCKER_DIAGNOSTICS_DIR/events"
+
+write_docker_diagnostic() {
+  python3 "$ROOT/scripts/write_docker_diagnostic.py" \
+    --output "$DOCKER_DIAGNOSTICS_FILE" \
+    --kind "$1" --target "$TARGET" --replication "$2" \
+    "${@:3}" >/dev/null 2>&1 || true
+}
+
+stop_docker_event_collector() {
+  if [ -n "$DOCKER_EVENTS_PID" ]; then
+    kill "$DOCKER_EVENTS_PID" 2>/dev/null || true
+    wait "$DOCKER_EVENTS_PID" 2>/dev/null || true
+    DOCKER_EVENTS_PID=""
+  fi
+}
+
+start_docker_event_collector() {
+  local event_file="$DOCKER_DIAGNOSTICS_DIR/events/${TARGET}.jsonl"
+  local event_error="$DOCKER_DIAGNOSTICS_DIR/events/${TARGET}.stderr.log"
+
+  if [ -z "${PROFUZZBENCH_RUN_ID:-}" ]; then
+    return 0
+  fi
+  docker events --format '{{json .}}' \
+    --filter "label=voltronbench.run_id=${PROFUZZBENCH_RUN_ID}" \
+    >"$event_file" 2>"$event_error" &
+  DOCKER_EVENTS_PID=$!
+  write_docker_diagnostic events_started 0 \
+    --status "$event_file"
+}
+
+capture_container_diagnostics() {
+  local id=$1
+  local index=$2
+  local inspect_file="$DOCKER_DIAGNOSTICS_DIR/inspect/${TARGET}-${index}.json"
+  local log_file="$DOCKER_DIAGNOSTICS_DIR/logs/${TARGET}-${index}.log"
+
+  # The helper removes Config.Env and other credential-bearing fields before
+  # writing inspect output. Container logs are intentionally kept separate.
+  if docker inspect "$id" 2>"$inspect_file.stderr" \
+    | python3 "$ROOT/scripts/sanitize_docker_inspect.py" >"$inspect_file"; then
+    rm -f "$inspect_file.stderr"
+  fi
+  raw_log="${log_file}.raw"
+  docker logs --timestamps "$id" >"$raw_log" 2>&1 || true
+  max_log_bytes=${PROFUZZBENCH_DOCKER_LOG_MAX_BYTES:-10485760}
+  case "$max_log_bytes" in
+    ''|*[!0-9]*) max_log_bytes=10485760 ;;
+  esac
+  if [ "$(wc -c <"$raw_log")" -gt "$max_log_bytes" ]; then
+    half=$((max_log_bytes / 2))
+    head -c "$half" "$raw_log" >"$log_file"
+    printf '\n[... docker log truncated ...]\n' >>"$log_file"
+    tail -c "$half" "$raw_log" >>"$log_file"
+    rm -f "$raw_log"
+  else
+    mv "$raw_log" "$log_file"
+  fi
+  write_docker_diagnostic container_diagnostics "$index" \
+    --container-id "$id" --status "$inspect_file"
+}
 
 record_manifest() {
   python3 "$ROOT/scripts/record_container_manifest.py" "$@" \
@@ -123,6 +189,7 @@ handle_interrupt() {
   printf "\nVOLTRON: Interrupt received. Cleaning up...\n"
   write_monitor_progress "Interrupted; stopping containers"
   stop_container_waiter
+  stop_docker_event_collector
   profuzzbench_stop_monitor "$MONITOR_PID"
   profuzzbench_interrupt_containers "${cids[@]}"
   if [ "$PROFUZZBENCH_EXTERNAL_MONITOR" != "1" ]; then
@@ -142,6 +209,32 @@ trap handle_interrupt INT TERM
 
 VOLTRON_SOURCE=$("$ROOT/scripts/prepare_voltron.sh")
 UV_CACHE_ROOT=${VOLTRON_UV_CACHE_ROOT:-"$ROOT/.runtime/voltron/uv-cache"}
+UV_CACHE_TEMPLATE=${VOLTRON_UV_CACHE_TEMPLATE:-"$ROOT/.runtime/voltron/uv-cache-template"}
+UV_CACHE_MODE=${VOLTRON_UV_CACHE_MODE:-prewarmed-private}
+
+prepare_uv_cache_instance() {
+  local cache_dir=$1
+  local temporary
+
+  if [ -f "$cache_dir/.ready" ]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$cache_dir")"
+  temporary=$(mktemp -d "${cache_dir}.tmp.XXXXXX")
+  if ! cp -a --reflink=auto "$UV_CACHE_TEMPLATE/." "$temporary/"; then
+    mv "$temporary" "${cache_dir}.failed.$(date +%s).$$" 2>/dev/null || true
+    return 1
+  fi
+  chmod 0777 "$temporary"
+  if [ -e "$cache_dir" ]; then
+    mv "$cache_dir" "${cache_dir}.incomplete.$(date +%s).$$"
+  fi
+  mv "$temporary" "$cache_dir"
+}
+
+if [ "$UV_CACHE_MODE" != legacy ]; then
+  "$ROOT/scripts/prepare_voltron_uv_cache.sh" "$DOCIMAGE" "$VOLTRON_SOURCE"
+fi
 
 VOLTRON_LLM_CONFIG=${VOLTRON_LLM_CONFIG:-"$ROOT/config/voltron-llm.yaml"}
 VOLTRON_KEY_POOL_COUNTER=${VOLTRON_LLM_API_KEY_COUNTER:-"$ROOT/.runtime/voltron/api-profile-counter"}
@@ -229,6 +322,8 @@ if [ "$VOLTRON_USE_API_GATEWAY" != "1" ]; then
   load_llm_profiles
 fi
 
+start_docker_event_collector
+
 for i in $(seq 1 "$RUNS"); do
   # uv mutates its cache while installing dependencies.  A shared bind mount
   # is unsafe for parallel targets: one container can leave root-owned cache
@@ -237,18 +332,28 @@ for i in $(seq 1 "$RUNS"); do
   # a specific cache with VOLTRON_UV_CACHE_DIR for single-container runs.
   if [ -n "${VOLTRON_UV_CACHE_DIR:-}" ]; then
     UV_CACHE="$VOLTRON_UV_CACHE_DIR"
+  elif [ "$UV_CACHE_MODE" != legacy ]; then
+    UV_CACHE="$UV_CACHE_ROOT/runs/${MANIFEST_RUN_ID}/${TARGET}-${i}"
   else
     UV_CACHE="$UV_CACHE_ROOT/${TARGET}-${i}"
+  fi
+  if [ "$UV_CACHE_MODE" != legacy ] \
+    && ! prepare_uv_cache_instance "$UV_CACHE"; then
+    printf 'VOLTRON: failed to prepare private uv cache: %s\n' \
+      "$UV_CACHE" >&2
+    stop_docker_event_collector
+    exit 2
   fi
   mkdir -p "$UV_CACHE"
   chmod 0777 "$UV_CACHE"
   docker_args=(
-    run --cpus=1 -d -it
+    run --init --cpus=1 -d -it
     --mount "type=bind,src=${VOLTRON_SOURCE},dst=/opt/voltron-src,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_voltron_container.sh,dst=/opt/voltron-benchmark-runner.sh,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-subject-overrides,dst=/opt/voltron-subject-overrides,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-main-runtime.patch,dst=/opt/voltron-main-runtime.patch,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-udp-bind-runtime.patch,dst=/opt/voltron-udp-bind-runtime.patch,readonly"
+    --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-executor-readiness-runtime.patch,dst=/opt/voltron-executor-readiness-runtime.patch,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-generator-evolution-runtime.patch,dst=/opt/voltron-generator-evolution-runtime.patch,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_export_voltron_replay.py,dst=/opt/voltron-export-aflnet-replay.py,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_voltron_coverage.sh,dst=/opt/voltron-coverage.sh,readonly"
@@ -257,6 +362,12 @@ for i in $(seq 1 "$RUNS"); do
     -e UV_CACHE_DIR=/home/ubuntu/.cache/uv
     -e UV_PYTHON_INSTALL_DIR=/home/ubuntu/.cache/uv/python
   )
+  if [ "$UV_CACHE_MODE" != legacy ]; then
+    docker_args+=(-e UV_OFFLINE=1)
+  fi
+  if [ "$TARGET" = "kamailio" ]; then
+    docker_args+=(--env KAMAILIO_CONTAINER_INIT=enabled)
+  fi
   if [ -n "${PROFUZZBENCH_RUN_ID:-}" ]; then
     docker_args+=(
       --label "voltronbench.run_id=${PROFUZZBENCH_RUN_ID}"
@@ -289,8 +400,23 @@ for i in $(seq 1 "$RUNS"); do
     )
   fi
 
+  stderr_file="$DOCKER_DIAGNOSTICS_DIR/${TARGET}-${i}.docker-run.stderr.log"
+  printf -v command_summary '%q ' docker "${docker_args[@]}" "$DOCIMAGE" /bin/bash \
+    /opt/voltron-benchmark-runner.sh "$TARGET" "$OUTDIR" "$TIMEOUT" "$SKIPCOUNT"
   id=$(docker "${docker_args[@]}" "$DOCIMAGE" /bin/bash \
-    /opt/voltron-benchmark-runner.sh "$TARGET" "$OUTDIR" "$TIMEOUT" "$SKIPCOUNT")
+    /opt/voltron-benchmark-runner.sh "$TARGET" "$OUTDIR" "$TIMEOUT" "$SKIPCOUNT" \
+    2>"$stderr_file")
+  docker_rc=$?
+  write_docker_diagnostic create_finished "$i" \
+    --returncode "$docker_rc" --container-id "$id" \
+    --stderr "$stderr_file" --command "$command_summary"
+  if [ "$docker_rc" -ne 0 ] || [ -z "$id" ]; then
+    printf '\nVOLTRON: docker run failed for %s replication %s (rc=%s); stderr: %s\n' \
+      "$TARGET" "$i" "$docker_rc" "$stderr_file" >&2
+    cat "$stderr_file" >&2
+    stop_docker_event_collector
+    exit 125
+  fi
   cids+=("${id::12}")
   record_manifest \
     --manifest "$MANIFEST_PATH" --event started \
@@ -345,9 +471,13 @@ fi
 remove_wait_status_file
 
 write_monitor_progress "Fuzzing finished; preparing archive collection"
+for index in "${!cids[@]}"; do
+  capture_container_diagnostics "${cids[$index]}" "$((index + 1))"
+done
 if ! collect_results; then
   CONTAINER_STATUS=1
 fi
+stop_docker_event_collector
 profuzzbench_stop_monitor "$MONITOR_PID"
 if [ "$PROFUZZBENCH_EXTERNAL_MONITOR" != "1" ]; then
   profuzzbench_print_final_container_summary "$LABEL" "$TIMEOUT" "${cids[@]}"

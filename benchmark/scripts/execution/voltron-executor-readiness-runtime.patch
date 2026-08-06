@@ -1,0 +1,16 @@
+--- a/voltron/executor/executor.py
++++ b/voltron/executor/executor.py
+@@ -557,7 +557,12 @@ class Executor:
+         # Preserve the historical 100-attempt socket-readiness window for
+         # subjects without a protocol hook.  The separate readiness timeout
+         # only bounds the optional protocol probe.
+-        timeout_s = max(self.setup_time_s, 100 * self.setup_time_s)
++        # setup_timeout_s is configured by the benchmark but used to be
++        # ignored here.  Honor it so slow local services, notably
++        # forked-daapd after its dbus/avahi setup, can finish binding.
++        timeout_s = max(
++            self.setup_time_s, self.setup_timeout_s, 100 * self.setup_time_s
++        )
+         deadline = time.monotonic() + timeout_s
+         attempt = 0
+         while attempt == 0 or time.monotonic() < deadline:

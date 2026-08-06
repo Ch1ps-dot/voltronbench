@@ -130,6 +130,10 @@ class ChatAflRuntimeConfigTests(unittest.TestCase):
             r'\"model\": \"%s\"',
             source,
         )
+        self.assertIn('"CHATAFL_LLM_CONNECT_TIMEOUT_MS", 10000L', source)
+        self.assertIn('"CHATAFL_LLM_REQUEST_TIMEOUT_MS", 330000L', source)
+        self.assertIn("CURLOPT_CONNECTTIMEOUT_MS, connect_timeout_ms", source)
+        self.assertIn("CURLOPT_TIMEOUT_MS, request_timeout_ms", source)
 
 
 class ChatAflRuntimePreparationTests(unittest.TestCase):
@@ -477,6 +481,14 @@ class ChatAflRuntimeIntegrationTests(unittest.TestCase):
                 ),
                 run_command,
             )
+            self.assertIn(
+                "CHATAFL_LLM_CONNECT_TIMEOUT_MS=10000",
+                run_command,
+            )
+            self.assertIn(
+                "CHATAFL_LLM_REQUEST_TIMEOUT_MS=330000",
+                run_command,
+            )
             network_index = run_command.index("--network")
             self.assertEqual(
                 run_command[network_index + 1],
@@ -539,6 +551,21 @@ class ChatAflRuntimeIntegrationTests(unittest.TestCase):
         )
         self.assertIn("container_root_copy", executor)
         self.assertIn('docker "${docker_args[@]}"', executor)
+        self.assertIn(
+            '--env "CHATAFL_LLM_CONNECT_TIMEOUT_MS=',
+            executor,
+        )
+        self.assertIn(
+            '--env "CHATAFL_LLM_REQUEST_TIMEOUT_MS=',
+            executor,
+        )
+        self.assertIn(
+            '"$FUZZER" == "stateafl" && "$DOCIMAGE" == "forked-daapd-stateafl-vol"',
+            executor,
+        )
+        self.assertIn("FORKED_DAAPD_PREFLIGHT_ATTEMPTS", executor)
+        self.assertIn("FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS", executor)
+        self.assertIn("FORKED_DAAPD_PREFLIGHT_RESPONSE_TIMEOUT_SECONDS", executor)
         self.assertIn("chatafl_runtime_metadata.txt", executor)
 
     def test_top_level_bundle_records_effective_runtime_configuration(
