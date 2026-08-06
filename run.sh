@@ -9,7 +9,8 @@ TIMEOUT=$(( DURATION_MINUTES * 60))
 SKIPCOUNT="${SKIPCOUNT:-5}"
 TEST_TIMEOUT="${TEST_TIMEOUT:-20000}"
 FORKED_DAAPD_STARTUP_WAIT_US="${FORKED_DAAPD_STARTUP_WAIT_US:-1000000}"
-FORKED_DAAPD_MIN_TEST_TIMEOUT_MS="${FORKED_DAAPD_MIN_TEST_TIMEOUT_MS:-3000}"
+FORKED_DAAPD_MIN_TEST_TIMEOUT_MS="${FORKED_DAAPD_MIN_TEST_TIMEOUT_MS:-20000}"
+FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS="${FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS:-20}"
 
 FORKED_DAAPD_PREFLIGHT_ATTEMPTS="${FORKED_DAAPD_PREFLIGHT_ATTEMPTS:-300}"
 FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS="${FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS:-0.1}"
@@ -51,6 +52,11 @@ if (( CHATAFL_LLM_REQUEST_TIMEOUT_MS < CHATAFL_LLM_CONNECT_TIMEOUT_MS )); then
 fi
 
 
+if [[ ! "$FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
+    echo "FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS must be a non-negative integer." >&2
+    exit 1
+fi
+
 FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE=$TEST_TIMEOUT
 if (( FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE \
     < FORKED_DAAPD_MIN_TEST_TIMEOUT_MS )); then
@@ -64,6 +70,7 @@ export FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS
 export FORKED_DAAPD_PREFLIGHT_RESPONSE_TIMEOUT_SECONDS
 export CHATAFL_LLM_CONNECT_TIMEOUT_MS
 export CHATAFL_LLM_REQUEST_TIMEOUT_MS
+export FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS
 
 CORE_PATTERN_PATH=/proc/sys/kernel/core_pattern
 CORE_PATTERN_ORIGINAL=
@@ -184,7 +191,15 @@ prepare_stateafl_kernel_settings() {
     fi
 }
 
+check_analysis_dependencies() {
+    if ! python3 "$PROJECT_ROOT/scripts/check_analysis_dependencies.py"; then
+        echo "Cannot start an experiment without host analysis dependencies." >&2
+        exit 1
+    fi
+}
+
 trap cleanup_run_environment EXIT
+check_analysis_dependencies
 prepare_stateafl_kernel_settings
 
 uses_chatafl=0
@@ -491,6 +506,8 @@ fi
     printf 'chatafl_llm_connect_timeout_ms=%s\n' "$CHATAFL_LLM_CONNECT_TIMEOUT_MS"
     printf 'chatafl_llm_request_timeout_ms=%s\n' "$CHATAFL_LLM_REQUEST_TIMEOUT_MS"
 
+    printf 'forked_daapd_container_start_delay_seconds=%s\n' \
+        "$FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS"
     printf 'raw_results_root=%s\n' "$RUN_ROOT"
     printf 'container_manifest=%s\n' "$PROFUZZBENCH_CONTAINER_MANIFEST"
     if [[ "$uses_chatafl" == "1" ]]; then

@@ -20,6 +20,11 @@ if [ -z "$FILTER" ]; then
     exit 1
 fi
 
+if ! python3 "$PROJECT_ROOT/scripts/check_analysis_dependencies.py"; then
+    echo "Analysis cannot continue without host analysis dependencies." >&2
+    exit 1
+fi
+
 if ! mkdir -p "$OUTPUT_ROOT"; then
     echo "Failed to create analysis output directory: $OUTPUT_ROOT" >&2
     exit 1
