@@ -513,6 +513,18 @@ Set a custom cache directory with:
 VOLTRON_UV_CACHE_DIR=/path/to/cache ./run.sh 1 30 lightftp voltron
 ```
 
+For an image-published Voltron source tree, set `VOLTRON_SOURCE_IMAGE`. The
+runner pulls the image, copies the source tree from `/opt/voltron-src` into a
+digest-keyed snapshot, and mounts that snapshot into each Voltron container:
+
+```bash
+VOLTRON_SOURCE_IMAGE=registry.example/voltron:bench-2026-08 \
+  ./run.sh 1 30 lightftp voltron
+```
+
+Use `VOLTRON_SOURCE_IMAGE_PATH` when the image stores the checkout elsewhere.
+The default Git mirror mode remains unchanged when this variable is unset.
+
 After the requested fuzzing time elapses, the Voltron container runner calls:
 
 ```bash

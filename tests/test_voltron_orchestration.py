@@ -29,6 +29,72 @@ def wait_for(predicate, timeout: float = 10.0) -> None:
 
 
 class VoltronOrchestrationTests(unittest.TestCase):
+    def test_prepare_voltron_can_extract_a_digest_keyed_source_image(self) -> None:
+        prepare = PROJECT_ROOT / "scripts" / "prepare_voltron.sh"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "image-source"
+            (source / "config").mkdir(parents=True)
+            (source / "voltron" / "synthesizer").mkdir(parents=True)
+            (source / "pyproject.toml").write_text("[project]\nname='image'\n")
+            (source / "cli.py").write_text("#!/usr/bin/env python3\n")
+            (source / "config" / "configs.yaml").write_text("  api_key: test\n")
+            (source / "voltron" / "synthesizer" / "synthesizer.py").write_text(
+                "# image synthesizer\n"
+            )
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_docker = fake_bin / "docker"
+            fake_docker.write_text(
+                """#!/bin/bash
+set -eu
+if [ "$1" = pull ]; then exit 0; fi
+if [ "$1" = image ] && [ "$2" = inspect ]; then
+  printf 'sha256:%s\\n' 'a'
+  exit 0
+fi
+if [ "$1" = create ]; then printf 'fake-container\\n'; exit 0; fi
+if [ "$1" = cp ]; then cp -a "$FAKE_SOURCE/." "${@: -1}"; exit 0; fi
+if [ "$1" = rm ]; then exit 0; fi
+exit 2
+""",
+                encoding="utf-8",
+            )
+            fake_docker.chmod(0o755)
+            cache = root / "cache"
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "PATH": f"{fake_bin}:{environment['PATH']}",
+                    "FAKE_SOURCE": str(source),
+                    "VOLTRON_SOURCE_IMAGE": "registry.example/voltron:test",
+                    "VOLTRON_CACHE_DIR": str(cache),
+                }
+            )
+            completed = subprocess.run(
+                ["bash", str(prepare)],
+                text=True,
+                capture_output=True,
+                check=True,
+                env=environment,
+            )
+            snapshot = Path(completed.stdout.strip())
+            self.assertTrue(snapshot.is_dir())
+            self.assertTrue((snapshot / "cli.py").is_file())
+            self.assertEqual(
+                (snapshot / ".benchmark-voltron-commit").read_text().strip(),
+                "image:sha256:a",
+            )
+            self.assertEqual(
+                (snapshot / ".benchmark-voltron-source-image").read_text().strip(),
+                "registry.example/voltron:test",
+            )
+            self.assertIn(
+                "<set-with-VOLTRON_LLM_API_KEY>",
+                (snapshot / "config" / "configs.yaml").read_text(),
+            )
+            self.assertTrue((snapshot / ".benchmark-ready").is_file())
+
     def test_prepare_voltron_rebuilds_incomplete_cached_snapshot(self) -> None:
         prepare = PROJECT_ROOT / "scripts" / "prepare_voltron.sh"
         with tempfile.TemporaryDirectory() as temporary:
