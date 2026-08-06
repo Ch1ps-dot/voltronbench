@@ -4,7 +4,7 @@ gateway:
   listen: 0.0.0.0
   port: 8000
   queue_size: 256
-  queue_timeout_seconds: 30
+  queue_timeout_seconds: 60
   upstream_timeout_seconds: 120
   max_attempts: 2
   rate_limit_cooldown_seconds: 5

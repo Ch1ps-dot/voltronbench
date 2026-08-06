@@ -193,6 +193,7 @@ esac
                     "VOLTRON_LLM_BASE_URL": "http://gateway.invalid/v1",
                     "VOLTRON_LLM_API_KEY": "internal",
                     "VOLTRON_LLM_MODEL": "test",
+                    "VOLTRON_UV_CACHE_MODE": "legacy",
                 }
             )
 
@@ -324,6 +325,7 @@ esac
                     "VOLTRON_LLM_BASE_URL": "http://gateway.invalid/v1",
                     "VOLTRON_LLM_API_KEY": "internal",
                     "VOLTRON_LLM_MODEL": "test",
+                    "VOLTRON_UV_CACHE_MODE": "legacy",
                 }
             )
 

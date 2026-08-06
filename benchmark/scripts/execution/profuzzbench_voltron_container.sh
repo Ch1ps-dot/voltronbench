@@ -165,6 +165,24 @@ apply_udp_bind_runtime_patch() {
 
 apply_udp_bind_runtime_patch
 
+apply_forked_daapd_readiness_runtime_patch() {
+  local patch_file=/opt/voltron-executor-readiness-runtime.patch
+
+  [ "$TARGET" = forked-daapd ] || return 0
+  [ -r "$patch_file" ] || return 0
+  if grep -Fq 'self.setup_time_s, self.setup_timeout_s, 100 * self.setup_time_s' \
+    voltron/executor/executor.py; then
+    printf 'VOLTRON: forked-daapd socket readiness runtime patch is already present\n'
+    return 0
+  fi
+  if ! patch --batch --forward -p1 < "$patch_file"; then
+    printf 'VOLTRON: forked-daapd socket readiness runtime patch did not apply\n' >&2
+    return 1
+  fi
+}
+
+apply_forked_daapd_readiness_runtime_patch
+
 apply_generator_evolution_runtime_patch() {
   local patch_file=/opt/voltron-generator-evolution-runtime.patch
 
@@ -201,7 +219,14 @@ replace_llm_setting model "$VOLTRON_LLM_MODEL"
 rm -rf "$OUTDIR"
 mkdir -p "$OUTDIR"
 
-uv sync --locked
+if [ "${UV_OFFLINE:-0}" = 1 ]; then
+  if ! uv sync --locked --offline; then
+    printf 'VOLTRON_RUNTIME_PREFLIGHT_FAILED: offline uv cache is incomplete\n' >&2
+    exit 2
+  fi
+else
+  uv sync --locked
+fi
 
 PLOT_DATA="$OUTDIR/plot_data"
 STAGE_FILE="$OUTDIR/.profuzzbench-stage"
