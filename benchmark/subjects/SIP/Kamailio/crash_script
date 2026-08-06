@@ -20,22 +20,26 @@ fi
 
 #process fuzzer-generated testcases
 count=0
-for f in $(echo $folder/$testdir/id* | grep -v "*"); do 
+export KAMAILIO_PJSUA_LOG="${folder}/kamailio-pjsua-crash-lifecycle.log"
+for f in $(echo $folder/$testdir/id* | grep -v "*"); do
 
   echo $f
 
-  $replayer $f SIP $pno 1 > /dev/null 2>&1 & ./run_pjsip > /dev/null 2>&1 &
-  timeout -k 1s -s SIGTERM 3s ./kamailio-gcov/src/kamailio -f ./kamailio-basic.cfg -L ./kamailio-gcov/src/modules -Y ./kamailio-gcov/runtime_dir/ -n 1 -D -E > /dev/null 2>&1
- 
+  "$WORKDIR/run_pjsip" & setup_pid=$!
+  "$replayer" "$f" SIP "$pno" 1 >/dev/null 2>&1 & replay_pid=$!
+  timeout -k 1s -s SIGTERM 3s ./kamailio-gcov/src/kamailio \
+    -f ./kamailio-basic.cfg -L ./kamailio-gcov/src/modules \
+    -Y ./kamailio-gcov/runtime_dir/ -n 1 -D -E >/dev/null 2>&1 & target_pid=$!
+  wait "$target_pid"; target_status=$?
+  wait "$setup_pid"; setup_status=$?
+  wait "$replay_pid"; replay_status=$?
+  "$WORKDIR/pjsua_lifecycle" stop >/dev/null 2>&1 || true
 
-  wait
-
-  if [ $? -ge 128 ]; then
-    echo "Terminated: $?"
+  if [ "$target_status" -ge 128 ]; then
+    echo "Terminated: $target_status"
   fi
 
   echo
   echo
 
 done
-

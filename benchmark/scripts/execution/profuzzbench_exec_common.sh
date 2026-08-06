@@ -202,7 +202,10 @@ trap handle_interrupt INT TERM
 
 #create one container for each run
 for i in $(seq 1 $RUNS); do
-  docker_args=(run --cpus=1 -d -it)
+  docker_args=(run --init --cpus=1 -d -it)
+  if [[ "$MANIFEST_TARGET" == "kamailio" ]]; then
+    docker_args+=(--env KAMAILIO_CONTAINER_INIT=enabled)
+  fi
   run_command="cd ${WORKDIR} && run ${FUZZER} ${OUTDIR} '${OPTIONS}' ${TIMEOUT} ${SKIPCOUNT}"
   container_command="$run_command"
   container_command_args=()

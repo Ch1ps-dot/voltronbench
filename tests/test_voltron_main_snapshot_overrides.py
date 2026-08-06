@@ -39,7 +39,7 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
         expected = {
             "exim": {"setup.sh"},
             "forked-daapd": {"setup.sh", "run.sh"},
-            "kamailio": {"run.sh"},
+            "kamailio": {"setup.sh", "run.sh", "pjsua_lifecycle.sh"},
             "lightftp": {"setup.sh", "run.sh"},
             "pure-ftpd": {"setup.sh"},
         }
