@@ -104,6 +104,17 @@ apply_subject_overrides() {
 
 apply_subject_overrides
 
+verify_subject_lifecycle_override() {
+  if [[ "$TARGET" == bftpd ]] \
+    && ! grep -Fq 'exec /home/ubuntu/experiments/bftpd/bftpd' \
+      config/subjects/bftpd/run.sh; then
+    printf 'VOLTRON: Bftpd lifecycle override did not take ownership of the SUT process\n' >&2
+    return 1
+  fi
+}
+
+verify_subject_lifecycle_override
+
 main_runtime_patch_is_present() {
   local synthesizer=voltron/synthesizer/synthesizer.py
 
