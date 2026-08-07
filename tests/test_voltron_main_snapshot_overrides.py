@@ -37,6 +37,7 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
 
     def test_overrides_are_shell_valid_and_cover_failed_suts(self) -> None:
         expected = {
+            "bftpd": {"run.sh"},
             "exim": {"setup.sh"},
             "forked-daapd": {"setup.sh", "run.sh"},
             "kamailio": {"setup.sh", "run.sh", "pjsua_lifecycle.sh"},
@@ -55,6 +56,14 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
                     check=False,
                 )
                 self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_bftpd_override_execs_the_owned_server_process(self) -> None:
+        run_script = (
+            EXECUTION_DIR / "voltron-subject-overrides" / "bftpd" / "run.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("exec /home/ubuntu/experiments/bftpd/bftpd", run_script)
+        self.assertIn("/home/ubuntu/experiments/basic.conf", run_script)
 
     def test_exim_setup_is_idempotent_and_pid_scoped(self) -> None:
         setup = EXECUTION_DIR / "voltron-subject-overrides" / "exim" / "setup.sh"
@@ -135,6 +144,11 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
         self.assertIn("voltron-main-runtime.patch", host_runner)
         self.assertIn("voltron-generator-evolution-runtime.patch", host_runner)
         self.assertIn("apply_subject_overrides", container_runner)
+        self.assertIn("verify_subject_lifecycle_override", container_runner)
+        self.assertIn(
+            "Bftpd lifecycle override did not take ownership",
+            container_runner,
+        )
         self.assertIn("apply_main_runtime_patch", container_runner)
         self.assertIn("main_runtime_patch_is_present", container_runner)
         self.assertIn("apply_generator_evolution_runtime_patch", container_runner)
