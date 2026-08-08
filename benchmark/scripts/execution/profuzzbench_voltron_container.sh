@@ -231,6 +231,14 @@ rm -rf "$OUTDIR"
 mkdir -p "$OUTDIR"
 
 if [ "${UV_OFFLINE:-0}" = 1 ]; then
+  unwritable_cache_path=$(find "${UV_CACHE_DIR:-/home/ubuntu/.cache/uv}" -xdev \
+    \( -type d ! -writable -o -type f ! -writable \) \
+    -print -quit 2>/dev/null || true)
+  if [ -n "$unwritable_cache_path" ]; then
+    printf 'VOLTRON_RUNTIME_PREFLIGHT_FAILED: offline uv cache is not writable: %s\n' \
+      "$unwritable_cache_path" >&2
+    exit 2
+  fi
   if ! uv sync --locked --offline; then
     printf 'VOLTRON_RUNTIME_PREFLIGHT_FAILED: offline uv cache is incomplete\n' >&2
     exit 2

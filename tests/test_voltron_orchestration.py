@@ -10,6 +10,9 @@ import unittest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUN_VOLTRON = PROJECT_ROOT / "run_voltron.sh"
+NORMALIZE_UV_CACHE_PERMISSIONS = (
+    PROJECT_ROOT / "scripts" / "normalize_voltron_uv_cache_permissions.sh"
+)
 EXEC_ALL = (
     PROJECT_ROOT
     / "benchmark"
@@ -29,6 +32,33 @@ def wait_for(predicate, timeout: float = 10.0) -> None:
 
 
 class VoltronOrchestrationTests(unittest.TestCase):
+    def test_private_uv_cache_permissions_support_non_root_images(self) -> None:
+        helper = (
+            PROJECT_ROOT
+            / "scripts"
+            / "normalize_voltron_uv_cache_permissions.sh"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / "cache"
+            nested = cache / "sdists-v9"
+            nested.mkdir(parents=True)
+            metadata = nested / ".git"
+            metadata.write_text("uv-cache\n", encoding="utf-8")
+            cache.chmod(0o777)
+            nested.chmod(0o755)
+            metadata.chmod(0o644)
+
+            completed = subprocess.run(
+                ["bash", str(helper), str(cache)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(nested.stat().st_mode & 0o007, 0o007)
+            self.assertEqual(metadata.stat().st_mode & 0o002, 0o002)
+
     def test_prepare_voltron_can_extract_a_digest_keyed_source_image(self) -> None:
         prepare = PROJECT_ROOT / "scripts" / "prepare_voltron.sh"
         with tempfile.TemporaryDirectory() as temporary:
@@ -211,6 +241,10 @@ profuzzbench_interrupt_containers() { :; }
             source.mkdir()
             prepare = root / "scripts" / "prepare_voltron.sh"
             prepare.parent.mkdir()
+            shutil.copy2(
+                NORMALIZE_UV_CACHE_PERMISSIONS,
+                prepare.parent / NORMALIZE_UV_CACHE_PERMISSIONS.name,
+            )
             prepare.write_text(
                 f"#!/bin/bash\nprintf '%s\\n' '{source}'\n",
                 encoding="utf-8",
@@ -330,6 +364,10 @@ profuzzbench_interrupt_containers() {
             source.mkdir()
             prepare = root / "scripts" / "prepare_voltron.sh"
             prepare.parent.mkdir()
+            shutil.copy2(
+                NORMALIZE_UV_CACHE_PERMISSIONS,
+                prepare.parent / NORMALIZE_UV_CACHE_PERMISSIONS.name,
+            )
             prepare.write_text(
                 f"#!/bin/bash\nprintf '%s\\n' '{source}'\n",
                 encoding="utf-8",

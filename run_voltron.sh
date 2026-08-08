@@ -211,13 +211,15 @@ VOLTRON_SOURCE=$("$ROOT/scripts/prepare_voltron.sh")
 UV_CACHE_ROOT=${VOLTRON_UV_CACHE_ROOT:-"$ROOT/.runtime/voltron/uv-cache"}
 UV_CACHE_TEMPLATE=${VOLTRON_UV_CACHE_TEMPLATE:-"$ROOT/.runtime/voltron/uv-cache-template"}
 UV_CACHE_MODE=${VOLTRON_UV_CACHE_MODE:-prewarmed-private}
+UV_CACHE_PERMISSION_HELPER="$ROOT/scripts/normalize_voltron_uv_cache_permissions.sh"
 
 prepare_uv_cache_instance() {
   local cache_dir=$1
   local temporary
 
   if [ -f "$cache_dir/.ready" ]; then
-    return 0
+    "$UV_CACHE_PERMISSION_HELPER" "$cache_dir"
+    return $?
   fi
   mkdir -p "$(dirname "$cache_dir")"
   temporary=$(mktemp -d "${cache_dir}.tmp.XXXXXX")
@@ -225,7 +227,10 @@ prepare_uv_cache_instance() {
     mv "$temporary" "${cache_dir}.failed.$(date +%s).$$" 2>/dev/null || true
     return 1
   fi
-  chmod 0777 "$temporary"
+  if ! "$UV_CACHE_PERMISSION_HELPER" "$temporary"; then
+    mv "$temporary" "${cache_dir}.failed.$(date +%s).$$" 2>/dev/null || true
+    return 1
+  fi
   if [ -e "$cache_dir" ]; then
     mv "$cache_dir" "${cache_dir}.incomplete.$(date +%s).$$"
   fi
@@ -345,7 +350,12 @@ for i in $(seq 1 "$RUNS"); do
     exit 2
   fi
   mkdir -p "$UV_CACHE"
-  chmod 0777 "$UV_CACHE"
+  if ! "$UV_CACHE_PERMISSION_HELPER" "$UV_CACHE"; then
+    printf 'VOLTRON: failed to normalize uv cache permissions: %s\n' \
+      "$UV_CACHE" >&2
+    stop_docker_event_collector
+    exit 2
+  fi
   docker_args=(
     run --init --cpus=1 -d -it
     --mount "type=bind,src=${VOLTRON_SOURCE},dst=/opt/voltron-src,readonly"
