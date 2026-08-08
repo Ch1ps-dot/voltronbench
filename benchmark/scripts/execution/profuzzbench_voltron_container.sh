@@ -11,7 +11,16 @@ VOLTRON_SOURCE=${VOLTRON_SOURCE:-/opt/voltron-src}
 VOLTRON_DIR=${VOLTRON_DIR:-/home/ubuntu/voltron-runtime}
 STATS_INTERVAL=${VOLTRON_STATS_INTERVAL:-10}
 COMPLIANCE_ANALYZER=${VOLTRON_COMPLIANCE_ANALYZER:-analyze_compliance.py}
+RUN_COMPLIANCE_ANALYSIS=${VOLTRON_RUN_COMPLIANCE_ANALYSIS:-0}
 TIMEOUT_MINUTES=$(( (TIMEOUT_SECONDS + 59) / 60 ))
+
+case "$RUN_COMPLIANCE_ANALYSIS" in
+  0|1) ;;
+  *)
+    printf 'VOLTRON: VOLTRON_RUN_COMPLIANCE_ANALYSIS must be 0 or 1\n' >&2
+    exit 2
+    ;;
+esac
 
 case "$TARGET" in
   pure-ftpd) VOLTRON_TARGET=pureftpd ;;
@@ -357,6 +366,14 @@ export_synthesized_component() {
 }
 
 run_compliance_analysis() {
+  if [ "$RUN_COMPLIANCE_ANALYSIS" != "1" ]; then
+    PAIR_COUNT=0
+    COMPLIANCE_STATE=SKIPPED
+    set_stage "FINALIZING 1/4: compliance analysis skipped"
+    printf 'Skipping compliance analysis (set VOLTRON_RUN_COMPLIANCE_ANALYSIS=1 to enable)\n'
+    return 0
+  fi
+
   local log_file="$OUTDIR/analyze_compliance.log"
   local pair_files=()
 
