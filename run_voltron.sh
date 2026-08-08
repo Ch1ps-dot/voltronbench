@@ -394,7 +394,11 @@ for i in $(seq 1 "$RUNS"); do
       -e "VOLTRON_LLM_MODEL=${VOLTRON_GATEWAY_MODEL:-voltron-default}"
     )
   fi
-  for env_name in VOLTRON_STATS_INTERVAL VOLTRON_COMPLIANCE_ANALYZER; do
+  for env_name in \
+    VOLTRON_STATS_INTERVAL \
+    VOLTRON_COMPLIANCE_ANALYZER \
+    VOLTRON_FORKED_DAAPD_SETUP_TIMEOUT_SECONDS \
+    VOLTRON_FORKED_DAAPD_READINESS_TIMEOUT_SECONDS; do
     if [ -n "${!env_name:-}" ]; then
       docker_args+=(-e "${env_name}=${!env_name}")
     fi

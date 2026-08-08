@@ -104,6 +104,55 @@ apply_subject_overrides() {
 
 apply_subject_overrides
 
+apply_forked_daapd_timeout_overrides() {
+  local config=config/configs.yaml
+  local setup_timeout=${VOLTRON_FORKED_DAAPD_SETUP_TIMEOUT_SECONDS:-}
+  local readiness_timeout=${VOLTRON_FORKED_DAAPD_READINESS_TIMEOUT_SECONDS:-}
+
+  [ "$TARGET" = forked-daapd ] || return 0
+  if [ -z "$setup_timeout" ] && [ -z "$readiness_timeout" ]; then
+    return 0
+  fi
+
+  python3 - "$config" "$setup_timeout" "$readiness_timeout" <<'PYTHON'
+import re
+import sys
+path, setup_value, readiness_value = sys.argv[1:]
+def valid(value, name):
+    if not value:
+        return None
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise SystemExit(f"VOLTRON: {name} must be a positive number") from error
+    if parsed <= 0:
+        raise SystemExit(f"VOLTRON: {name} must be a positive number")
+    return value
+setup_value = valid(setup_value, "VOLTRON_FORKED_DAAPD_SETUP_TIMEOUT_SECONDS")
+readiness_value = valid(readiness_value, "VOLTRON_FORKED_DAAPD_READINESS_TIMEOUT_SECONDS")
+text = open(path, encoding="utf-8").read()
+match = re.search(r"^forked-daapd:\n(?P<body>(?:^[ ]{2}.*\n)*)", text, re.M)
+if match is None:
+    raise SystemExit("VOLTRON: forked-daapd target configuration is missing")
+body = match.group("body")
+for key, value in (("setup_timeout_seconds", setup_value), ("readiness_timeout_seconds", readiness_value)):
+    if value is None:
+        continue
+    line = f"  {key}: {value}\n"
+    if re.search(rf"^  {re.escape(key)}:.*\n", body, re.M):
+        body = re.sub(rf"^  {re.escape(key)}:.*\n", line, body, flags=re.M)
+    else:
+        body += line
+text = text[:match.start("body")] + body + text[match.end("body"):]
+with open(path, "w", encoding="utf-8") as handle:
+    handle.write(text)
+PYTHON
+  printf 'VOLTRON: forked-daapd timeouts: socket=%ss http=%ss\n' \
+    "${setup_timeout:-default}" "${readiness_timeout:-default}"
+}
+
+apply_forked_daapd_timeout_overrides
+
 verify_subject_lifecycle_override() {
   if [[ "$TARGET" == bftpd ]] \
     && ! grep -Fq 'exec /home/ubuntu/experiments/bftpd/bftpd' \
