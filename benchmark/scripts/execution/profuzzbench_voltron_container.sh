@@ -116,13 +116,12 @@ apply_subject_overrides
 apply_forked_daapd_timeout_overrides() {
   local config=config/configs.yaml
   local setup_timeout=${VOLTRON_FORKED_DAAPD_SETUP_TIMEOUT_SECONDS:-}
-  local readiness_timeout=${VOLTRON_FORKED_DAAPD_READINESS_TIMEOUT_SECONDS:-}
+  # The historical five-second HTTP probe limit was reached under normal
+  # concurrent load.  Keep a target-scoped ten-second default while allowing
+  # an experiment to override it explicitly.
+  local readiness_timeout=${VOLTRON_FORKED_DAAPD_READINESS_TIMEOUT_SECONDS:-10}
 
   [ "$TARGET" = forked-daapd ] || return 0
-  if [ -z "$setup_timeout" ] && [ -z "$readiness_timeout" ]; then
-    return 0
-  fi
-
   python3 - "$config" "$setup_timeout" "$readiness_timeout" <<'PYTHON'
 import re
 import sys

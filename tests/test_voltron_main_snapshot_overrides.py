@@ -140,6 +140,17 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
         self.assertIn("apply_exim_lifecycle_override", container_runner)
         self.assertIn("readiness_script: ready.sh", container_runner)
 
+    def test_forked_daapd_uses_a_target_scoped_readiness_default(self) -> None:
+        container_runner = (
+            EXECUTION_DIR / "profuzzbench_voltron_container.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "VOLTRON_FORKED_DAAPD_READINESS_TIMEOUT_SECONDS:-10",
+            container_runner,
+        )
+        self.assertIn("apply_forked_daapd_timeout_overrides", container_runner)
+
     def test_runner_applies_overrides_and_main_retry_patch(self) -> None:
         host_runner = (PROJECT_ROOT / "run_voltron.sh").read_text(
             encoding="utf-8"
