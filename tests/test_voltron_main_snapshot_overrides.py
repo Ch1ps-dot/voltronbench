@@ -38,7 +38,7 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
     def test_overrides_are_shell_valid_and_cover_failed_suts(self) -> None:
         expected = {
             "bftpd": {"run.sh"},
-            "exim": {"setup.sh"},
+            "exim": {"setup.sh", "run.sh", "ready.sh"},
             "forked-daapd": {"setup.sh", "run.sh"},
             "kamailio": {"setup.sh", "run.sh", "pjsua_lifecycle.sh"},
             "lightftp": {"setup.sh", "run.sh"},
@@ -125,6 +125,20 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
                 if target.poll() is None:
                     target.kill()
                     target.wait(timeout=5)
+
+    def test_exim_override_owns_server_and_checks_smtp_banner(self) -> None:
+        exim_dir = EXECUTION_DIR / "voltron-subject-overrides" / "exim"
+        run_script = (exim_dir / "run.sh").read_text(encoding="utf-8")
+        readiness_script = (exim_dir / "ready.sh").read_text(encoding="utf-8")
+        container_runner = (
+            EXECUTION_DIR / "profuzzbench_voltron_container.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("exec /usr/exim/bin/exim", run_script)
+        self.assertIn("/tmp/voltron-exim.pid", run_script)
+        self.assertIn("banner.startswith(b\"220 \")", readiness_script)
+        self.assertIn("apply_exim_lifecycle_override", container_runner)
+        self.assertIn("readiness_script: ready.sh", container_runner)
 
     def test_runner_applies_overrides_and_main_retry_patch(self) -> None:
         host_runner = (PROJECT_ROOT / "run_voltron.sh").read_text(

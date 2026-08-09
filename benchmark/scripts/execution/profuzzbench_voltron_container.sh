@@ -162,11 +162,50 @@ PYTHON
 
 apply_forked_daapd_timeout_overrides
 
+apply_exim_lifecycle_override() {
+  local config=config/configs.yaml
+
+  [ "$TARGET" = exim ] || return 0
+
+  python3 - "$config" <<'PYTHON'
+import re
+import sys
+
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+match = re.search(r"^exim:\n(?P<body>(?:^[ ]{2}.*\n)*)", text, re.M)
+if match is None:
+    raise SystemExit("VOLTRON: Exim target configuration is missing")
+
+body = match.group("body")
+line = "  readiness_script: ready.sh\n"
+if re.search(r"^  readiness_script:.*\n", body, re.M):
+    body = re.sub(r"^  readiness_script:.*\n", line, body, flags=re.M)
+else:
+    body += line
+
+text = text[:match.start("body")] + body + text[match.end("body"):]
+with open(path, "w", encoding="utf-8") as handle:
+    handle.write(text)
+PYTHON
+  printf 'VOLTRON: Exim uses controlled PID lifecycle and SMTP banner readiness\n'
+}
+
+apply_exim_lifecycle_override
+
 verify_subject_lifecycle_override() {
   if [[ "$TARGET" == bftpd ]] \
     && ! grep -Fq 'exec /home/ubuntu/experiments/bftpd/bftpd' \
       config/subjects/bftpd/run.sh; then
     printf 'VOLTRON: Bftpd lifecycle override did not take ownership of the SUT process\n' >&2
+    return 1
+  fi
+
+  if [[ "$TARGET" == exim ]] \
+    && { ! grep -Fq 'exec /usr/exim/bin/exim' config/subjects/exim/run.sh \
+      || ! grep -Fq 'readiness_script: ready.sh' config/configs.yaml \
+      || [ ! -x config/subjects/exim/ready.sh ]; }; then
+    printf 'VOLTRON: Exim lifecycle override did not take ownership of the SUT process\n' >&2
     return 1
   fi
 }
