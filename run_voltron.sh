@@ -10,6 +10,15 @@ OUTDIR=$5
 TIMEOUT=$6
 SKIPCOUNT=${7:-5}
 DELETE=${8:-}
+VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
+
+case "$VOLTRON_RUN_MODE" in
+  full|learn-export) ;;
+  *)
+    printf 'VOLTRON_RUN_MODE must be either full or learn-export.\n' >&2
+    exit 2
+    ;;
+esac
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
 source "$ROOT/benchmark/scripts/execution/profuzzbench_monitor_common.sh"
@@ -208,6 +217,11 @@ handle_interrupt() {
 trap handle_interrupt INT TERM
 
 VOLTRON_SOURCE=$("$ROOT/scripts/prepare_voltron.sh")
+if [[ "$VOLTRON_RUN_MODE" == "learn-export" ]] \
+  && ! grep -Fq -- '--learn-and-export' "$VOLTRON_SOURCE/cli.py"; then
+  printf 'VOLTRON: INCOMPATIBLE_VOLTRON_SNAPSHOT; --learn-and-export is missing\n' >&2
+  exit 2
+fi
 UV_CACHE_ROOT=${VOLTRON_UV_CACHE_ROOT:-"$ROOT/.runtime/voltron/uv-cache"}
 UV_CACHE_TEMPLATE=${VOLTRON_UV_CACHE_TEMPLATE:-"$ROOT/.runtime/voltron/uv-cache-template"}
 UV_CACHE_MODE=${VOLTRON_UV_CACHE_MODE:-prewarmed-private}
@@ -382,6 +396,7 @@ for i in $(seq 1 "$RUNS"); do
     docker_args+=(
       --label "voltronbench.run_id=${PROFUZZBENCH_RUN_ID}"
       --label "voltronbench.project=${TARGET}"
+      --label "voltronbench.mode=${VOLTRON_RUN_MODE}"
       --label "voltronbench.project_index=${PROFUZZBENCH_PROJECT_INDEX:-0}"
       --label "voltronbench.stage_file=/home/ubuntu/voltron-runtime/${OUTDIR}/.profuzzbench-stage"
     )
@@ -395,6 +410,7 @@ for i in $(seq 1 "$RUNS"); do
     )
   fi
   for env_name in \
+    VOLTRON_RUN_MODE \
     VOLTRON_STATS_INTERVAL \
     VOLTRON_COMPLIANCE_ANALYZER \
     VOLTRON_RUN_COMPLIANCE_ANALYSIS \

@@ -123,6 +123,9 @@ def main() -> int:
             "coverage_status",
             "coverage_exit_code",
             "component_export_status",
+            "voltron_run_mode",
+            "learning_export_status",
+            "learning_bundle_sha256",
             "voltron_source_commit",
             "lifecycle_mode",
         ):

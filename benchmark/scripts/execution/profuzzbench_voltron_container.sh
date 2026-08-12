@@ -12,12 +12,21 @@ VOLTRON_DIR=${VOLTRON_DIR:-/home/ubuntu/voltron-runtime}
 STATS_INTERVAL=${VOLTRON_STATS_INTERVAL:-10}
 COMPLIANCE_ANALYZER=${VOLTRON_COMPLIANCE_ANALYZER:-analyze_compliance.py}
 RUN_COMPLIANCE_ANALYSIS=${VOLTRON_RUN_COMPLIANCE_ANALYSIS:-0}
+VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
 TIMEOUT_MINUTES=$(( (TIMEOUT_SECONDS + 59) / 60 ))
 
 case "$RUN_COMPLIANCE_ANALYSIS" in
   0|1) ;;
   *)
     printf 'VOLTRON: VOLTRON_RUN_COMPLIANCE_ANALYSIS must be 0 or 1\n' >&2
+    exit 2
+    ;;
+esac
+
+case "$VOLTRON_RUN_MODE" in
+  full|learn-export) ;;
+  *)
+    printf 'VOLTRON: VOLTRON_RUN_MODE must be full or learn-export\n' >&2
     exit 2
     ;;
 esac
@@ -468,6 +477,9 @@ write_postprocess_status() {
     "$COVERAGE_STATE" \
     "$COVERAGE_STATUS" \
     "$COMPONENT_EXPORT_STATUS" \
+    "$VOLTRON_RUN_MODE" \
+    "$LEARNING_EXPORT_STATUS" \
+    "$LEARNING_BUNDLE_SHA256" \
     "$VOLTRON_SOURCE_COMMIT" \
     "$VOLTRON_LIFECYCLE_MODE" <<'PY'
 import json
@@ -483,6 +495,9 @@ from pathlib import Path
     coverage_state,
     coverage_status,
     component_export_status,
+    run_mode,
+    learning_export_status,
+    learning_bundle_sha256,
     voltron_source_commit,
     lifecycle_mode,
 ) = sys.argv[1:]
@@ -496,14 +511,72 @@ payload = {
     "coverage_exit_code": int(coverage_status),
     "component_export_status": "COMPLETED"
     if int(component_export_status) == 0 else "PARTIAL",
+    "voltron_run_mode": run_mode,
+    "learning_export_status": learning_export_status,
+    "learning_bundle_sha256": learning_bundle_sha256,
     "voltron_source_commit": voltron_source_commit,
     "lifecycle_mode": lifecycle_mode,
 }
+
 target = Path(output_path)
 temporary = target.with_suffix(target.suffix + ".tmp")
 temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 temporary.replace(target)
 PY
+}
+
+export_learning_bundle() {
+  local bundle="$OUTDIR/learning_bundle.tar.gz"
+  local report="$OUTDIR/learning_export_status.json"
+
+  set_stage "FINALIZING 1/4: validating learning bundle"
+  LEARNING_EXPORT_STATUS=$(python3 - "$bundle" "$report" "$VOLTRON_TARGET" <<'PY'
+import hashlib
+import json
+import sys
+import tarfile
+from pathlib import Path
+
+bundle, report_path, target = map(Path, sys.argv[1:])
+payload = {"target": target.name, "bundle": str(bundle), "status": "FAILED"}
+try:
+    digest = hashlib.sha256(bundle.read_bytes()).hexdigest()
+    with tarfile.open(bundle, "r:gz") as archive:
+        member = archive.getmember("manifest.json")
+        manifest = json.loads(archive.extractfile(member).read().decode("utf-8"))
+    if manifest.get("target") != target.name:
+        raise ValueError("bundle target mismatch")
+    if not isinstance(manifest.get("files"), dict) or not manifest["files"]:
+        raise ValueError("bundle manifest has no files")
+    has_model = any(name.endswith("evolved_hypothesis.pkl") for name in manifest["files"])
+    has_partial = any(name.endswith("partial_guidance.pkl") for name in manifest["files"])
+    if not (has_model or has_partial):
+        raise ValueError("bundle has neither complete model nor partial guidance")
+    payload.update({
+        "status": "COMPLETED",
+        "sha256": digest,
+        "bundle_format": manifest.get("format"),
+        "protocol": manifest.get("protocol"),
+        "complete_model": has_model,
+        "partial_guidance": has_partial,
+        "file_count": len(manifest["files"]),
+    })
+except Exception as exc:
+    payload["error"] = str(exc)
+report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+print(payload.get("status", "FAILED"))
+print(payload.get("sha256", ""), file=sys.stderr)
+PY
+)
+  LEARNING_BUNDLE_SHA256=$(python3 - "$report" <<'PY'
+import json, sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("sha256", ""))
+except Exception:
+    print("")
+PY
+)
+  [ "$LEARNING_EXPORT_STATUS" = COMPLETED ]
 }
 
 run_code_coverage() {
@@ -519,12 +592,23 @@ run_code_coverage() {
     "$TARGET" "$result_dir" "$SKIPCOUNT"
 }
 
-set_stage "FUZZING 0/4"
+STATUS=255
+COMPONENT_EXPORT_STATUS=255
+LEARNING_EXPORT_STATUS=NOT_REQUESTED
+LEARNING_BUNDLE_SHA256=
+
+if [ "$VOLTRON_RUN_MODE" = learn-export ]; then
+  set_stage "LEARNING 0/4: model learning"
+  mode_args=(--learn-and-export)
+else
+  set_stage "FUZZING 0/4"
+  mode_args=()
+fi
 uv run cli.py \
   --sut "$VOLTRON_TARGET" \
   --algorithm state \
   --time "$TIMEOUT_MINUTES" \
-  --output "$OUTDIR" &
+  --output "$OUTDIR" "${mode_args[@]}" &
 FUZZ_PID=$!
 
 sample_count=0
@@ -543,17 +627,29 @@ record_status
 COMPONENT_EXPORT_STATUS=0
 export_synthesized_component || COMPONENT_EXPORT_STATUS=$?
 
-PAIR_COUNT=0
-COMPLIANCE_STATE=FAILED
-run_compliance_analysis
-COMPLIANCE_STATUS=$?
-
-run_code_coverage
-COVERAGE_STATUS=$?
-if [ "$COVERAGE_STATUS" -eq 0 ]; then
-  COVERAGE_STATE=COMPLETED
+if [ "$VOLTRON_RUN_MODE" = learn-export ]; then
+  if ! export_learning_bundle; then
+    LEARNING_EXPORT_STATUS=FAILED
+  fi
+  PAIR_COUNT=0
+  COMPLIANCE_STATE=SKIPPED_LEARNING_ONLY
+  COMPLIANCE_STATUS=0
+  COVERAGE_STATE=SKIPPED_LEARNING_ONLY
+  COVERAGE_STATUS=0
 else
-  COVERAGE_STATE=FAILED
+  LEARNING_EXPORT_STATUS=NOT_REQUESTED
+  PAIR_COUNT=0
+  COMPLIANCE_STATE=FAILED
+  run_compliance_analysis
+  COMPLIANCE_STATUS=$?
+
+  run_code_coverage
+  COVERAGE_STATUS=$?
+  if [ "$COVERAGE_STATUS" -eq 0 ]; then
+    COVERAGE_STATE=COMPLETED
+  else
+    COVERAGE_STATE=FAILED
+  fi
 fi
 
 write_postprocess_status
@@ -566,5 +662,8 @@ if [ "$STATUS" -ne 0 ]; then
 fi
 if [ "$COMPLIANCE_STATUS" -ne 0 ]; then
   exit "$COMPLIANCE_STATUS"
+fi
+if [ "$LEARNING_EXPORT_STATUS" = FAILED ]; then
+  exit 1
 fi
 exit "$COVERAGE_STATUS"

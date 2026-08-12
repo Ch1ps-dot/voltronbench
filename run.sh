@@ -220,6 +220,7 @@ done
 
 CHATAFL_USE_API_GATEWAY=${CHATAFL_USE_API_GATEWAY:-1}
 VOLTRON_USE_API_GATEWAY=${VOLTRON_USE_API_GATEWAY:-1}
+VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
 
 validate_gateway_switch() {
     local name=$1
@@ -240,6 +241,14 @@ if [[ "$uses_voltron" == "1" ]]; then
     validate_gateway_switch VOLTRON_USE_API_GATEWAY \
         "$VOLTRON_USE_API_GATEWAY"
     export VOLTRON_USE_API_GATEWAY
+    case "$VOLTRON_RUN_MODE" in
+        full|learn-export) ;;
+        *)
+            echo "VOLTRON_RUN_MODE must be either full or learn-export." >&2
+            exit 1
+            ;;
+    esac
+    export VOLTRON_RUN_MODE
 fi
 
 uses_api_gateway=0
@@ -489,6 +498,9 @@ fi
     printf 'duration_minutes=%s\n' "$DURATION_MINUTES"
     printf 'targets=%s\n' "$TARGET_LIST"
     printf 'fuzzers=%s\n' "$FUZZER_LIST"
+    if [[ "$uses_voltron" == "1" ]]; then
+        printf 'voltron_run_mode=%s\n' "$VOLTRON_RUN_MODE"
+    fi
     printf 'skipcount=%s\n' "$SKIPCOUNT"
     printf 'test_timeout_ms=%s\n' "$TEST_TIMEOUT"
     printf 'forked_daapd_startup_wait_us=%s\n' \
