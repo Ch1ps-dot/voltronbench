@@ -28,6 +28,9 @@ class ContainerManifestTests(unittest.TestCase):
                     "compliance_exit_code": 3,
                     "coverage_status": "COMPLETED",
                     "coverage_exit_code": 0,
+                    "model_batch": "example",
+                    "model_import_status": "COMPLETED",
+                    "imported_bundle_archive_status": "COMPLETED",
                     "voltron_source_commit": "abc123",
                     "lifecycle_mode": "environment_once+ftp_banner_readiness",
                 }
@@ -44,6 +47,12 @@ class ContainerManifestTests(unittest.TestCase):
             self.assertEqual(
                 MODULE.read_postprocess_status(archive)["lifecycle_mode"],
                 "environment_once+ftp_banner_readiness",
+            )
+            self.assertEqual(
+                MODULE.read_postprocess_status(archive)[
+                    "imported_bundle_archive_status"
+                ],
+                "COMPLETED",
             )
 
     def test_missing_or_invalid_status_is_empty(self) -> None:

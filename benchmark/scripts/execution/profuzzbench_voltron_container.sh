@@ -405,6 +405,8 @@ export_synthesized_component() {
   local equipment_source="component/equipment/$VOLTRON_TARGET"
   local models_source="component/models/$VOLTRON_TARGET"
   local manifest="$component_root/export_manifest.txt"
+  local imported_bundle="$component_root/imported_learning_bundle.tar.gz"
+  local exported_bundle_sha256=
   local status=0
 
   set_stage "FINALIZING 0/4: exporting synthesized components"
@@ -412,8 +414,17 @@ export_synthesized_component() {
   printf 'target=%s\n' "$VOLTRON_TARGET" > "$manifest"
   printf 'source_root=%s\n' "$VOLTRON_DIR" >> "$manifest"
 
+  if [ -n "$VOLTRON_MODEL_BATCH" ]; then
+    # Imported batches deliberately keep their equipment beside the model,
+    # rather than in component/equipment/<target>.  Export that exact
+    # provenance boundary instead of reporting a false partial export.
+    equipment_source="component/models/$VOLTRON_TARGET/$VOLTRON_MODEL_BATCH/equipment"
+    models_source="component/models/$VOLTRON_TARGET/$VOLTRON_MODEL_BATCH"
+    printf 'model_batch=%s\n' "$VOLTRON_MODEL_BATCH" >> "$manifest"
+  fi
+
   if [ -d "$equipment_source" ]; then
-    cp -a "$equipment_source" "$component_root/equipment/"
+    cp -a "$equipment_source" "$component_root/equipment/$VOLTRON_TARGET"
     printf 'equipment=exported\n' >> "$manifest"
   else
     printf 'equipment=missing\n' >> "$manifest"
@@ -421,11 +432,37 @@ export_synthesized_component() {
   fi
 
   if [ -d "$models_source" ]; then
-    cp -a "$models_source" "$component_root/models/"
+    if [ -n "$VOLTRON_MODEL_BATCH" ]; then
+      mkdir -p "$component_root/models/$VOLTRON_TARGET"
+      cp -a "$models_source" \
+        "$component_root/models/$VOLTRON_TARGET/$VOLTRON_MODEL_BATCH"
+    else
+      cp -a "$models_source" "$component_root/models/"
+    fi
     printf 'models=exported\n' >> "$manifest"
   else
     printf 'models=missing\n' >> "$manifest"
     status=1
+  fi
+
+  IMPORTED_BUNDLE_ARCHIVE_STATUS=NOT_REQUESTED
+  if [ -n "$VOLTRON_MODEL_BATCH" ]; then
+    if cp -a "$VOLTRON_LEARNING_BUNDLE_PATH" "$imported_bundle"; then
+      exported_bundle_sha256=$(sha256sum "$imported_bundle" | awk '{print $1}')
+      if [ "$exported_bundle_sha256" = "$MODEL_IMPORT_BUNDLE_SHA256" ]; then
+        IMPORTED_BUNDLE_ARCHIVE_STATUS=COMPLETED
+        printf 'imported_bundle=exported\n' >> "$manifest"
+        printf 'imported_bundle_sha256=%s\n' "$exported_bundle_sha256" >> "$manifest"
+      else
+        IMPORTED_BUNDLE_ARCHIVE_STATUS=SHA256_MISMATCH
+        printf 'imported_bundle=sha256_mismatch\n' >> "$manifest"
+        status=1
+      fi
+    else
+      IMPORTED_BUNDLE_ARCHIVE_STATUS=FAILED
+      printf 'imported_bundle=missing\n' >> "$manifest"
+      status=1
+    fi
   fi
 
   printf 'export_status=%s\n' "$status" >> "$manifest"
@@ -503,6 +540,7 @@ write_postprocess_status() {
     "$MODEL_IMPORT_STATUS" \
     "$MODEL_IMPORT_BUNDLE_SHA256" \
     "$VOLTRON_MODEL_BATCH" \
+    "$IMPORTED_BUNDLE_ARCHIVE_STATUS" \
     "$VOLTRON_SOURCE_COMMIT" \
     "$VOLTRON_LIFECYCLE_MODE" <<'PY'
 import json
@@ -524,6 +562,7 @@ from pathlib import Path
     model_import_status,
     model_import_bundle_sha256,
     model_batch,
+    imported_bundle_archive_status,
     voltron_source_commit,
     lifecycle_mode,
 ) = sys.argv[1:]
@@ -543,6 +582,7 @@ payload = {
     "model_import_status": model_import_status,
     "model_import_bundle_sha256": model_import_bundle_sha256,
     "model_batch": model_batch or None,
+    "imported_bundle_archive_status": imported_bundle_archive_status,
     "voltron_source_commit": voltron_source_commit,
     "lifecycle_mode": lifecycle_mode,
 }
@@ -627,6 +667,7 @@ LEARNING_EXPORT_STATUS=NOT_REQUESTED
 LEARNING_BUNDLE_SHA256=
 MODEL_IMPORT_STATUS=NOT_REQUESTED
 MODEL_IMPORT_BUNDLE_SHA256=
+IMPORTED_BUNDLE_ARCHIVE_STATUS=NOT_REQUESTED
 
 import_model_batch() {
   local report="$OUTDIR/model_import.json"
