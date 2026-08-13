@@ -13,6 +13,8 @@ STATS_INTERVAL=${VOLTRON_STATS_INTERVAL:-10}
 COMPLIANCE_ANALYZER=${VOLTRON_COMPLIANCE_ANALYZER:-analyze_compliance.py}
 RUN_COMPLIANCE_ANALYSIS=${VOLTRON_RUN_COMPLIANCE_ANALYSIS:-0}
 VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
+VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
+VOLTRON_LEARNING_BUNDLE_PATH=${VOLTRON_LEARNING_BUNDLE_PATH:-}
 TIMEOUT_MINUTES=$(( (TIMEOUT_SECONDS + 59) / 60 ))
 
 case "$RUN_COMPLIANCE_ANALYSIS" in
@@ -30,6 +32,24 @@ case "$VOLTRON_RUN_MODE" in
     exit 2
     ;;
 esac
+
+if [ -n "$VOLTRON_MODEL_BATCH" ]; then
+  if [ "$VOLTRON_RUN_MODE" != full ]; then
+    printf 'VOLTRON: VOLTRON_MODEL_BATCH requires VOLTRON_RUN_MODE=full\n' >&2
+    exit 2
+  fi
+  case "$VOLTRON_MODEL_BATCH" in
+    *[!A-Za-z0-9._-]*|'')
+      printf 'VOLTRON: VOLTRON_MODEL_BATCH must be a safe batch name\n' >&2
+      exit 2
+      ;;
+  esac
+  if [ ! -r "$VOLTRON_LEARNING_BUNDLE_PATH" ]; then
+    printf 'VOLTRON: model batch bundle is not readable: %s\n' \
+      "$VOLTRON_LEARNING_BUNDLE_PATH" >&2
+    exit 2
+  fi
+fi
 
 case "$TARGET" in
   pure-ftpd) VOLTRON_TARGET=pureftpd ;;
@@ -480,6 +500,9 @@ write_postprocess_status() {
     "$VOLTRON_RUN_MODE" \
     "$LEARNING_EXPORT_STATUS" \
     "$LEARNING_BUNDLE_SHA256" \
+    "$MODEL_IMPORT_STATUS" \
+    "$MODEL_IMPORT_BUNDLE_SHA256" \
+    "$VOLTRON_MODEL_BATCH" \
     "$VOLTRON_SOURCE_COMMIT" \
     "$VOLTRON_LIFECYCLE_MODE" <<'PY'
 import json
@@ -498,6 +521,9 @@ from pathlib import Path
     run_mode,
     learning_export_status,
     learning_bundle_sha256,
+    model_import_status,
+    model_import_bundle_sha256,
+    model_batch,
     voltron_source_commit,
     lifecycle_mode,
 ) = sys.argv[1:]
@@ -514,6 +540,9 @@ payload = {
     "voltron_run_mode": run_mode,
     "learning_export_status": learning_export_status,
     "learning_bundle_sha256": learning_bundle_sha256,
+    "model_import_status": model_import_status,
+    "model_import_bundle_sha256": model_import_bundle_sha256,
+    "model_batch": model_batch or None,
     "voltron_source_commit": voltron_source_commit,
     "lifecycle_mode": lifecycle_mode,
 }
@@ -596,13 +625,43 @@ STATUS=255
 COMPONENT_EXPORT_STATUS=255
 LEARNING_EXPORT_STATUS=NOT_REQUESTED
 LEARNING_BUNDLE_SHA256=
+MODEL_IMPORT_STATUS=NOT_REQUESTED
+MODEL_IMPORT_BUNDLE_SHA256=
+
+import_model_batch() {
+  local report="$OUTDIR/model_import.json"
+
+  [ -n "$VOLTRON_MODEL_BATCH" ] || return 0
+  set_stage "IMPORTING 0/4: activating model batch $VOLTRON_MODEL_BATCH"
+  MODEL_IMPORT_BUNDLE_SHA256=$(sha256sum "$VOLTRON_LEARNING_BUNDLE_PATH" | awk '{print $1}')
+  if uv run cli.py \
+      --sut "$VOLTRON_TARGET" \
+      --import-learning-bundle "$VOLTRON_LEARNING_BUNDLE_PATH" \
+      --activate-import --batch-id "$VOLTRON_MODEL_BATCH" >"$report" 2>&1; then
+    MODEL_IMPORT_STATUS=COMPLETED
+    return 0
+  fi
+  MODEL_IMPORT_STATUS=FAILED
+  printf 'VOLTRON: failed to import model batch %s; see %s\n' \
+    "$VOLTRON_MODEL_BATCH" "$report" >&2
+  return 1
+}
+
+if ! import_model_batch; then
+  exit 2
+fi
 
 if [ "$VOLTRON_RUN_MODE" = learn-export ]; then
   set_stage "LEARNING 0/4: model learning"
   mode_args=(--learn-and-export)
 else
-  set_stage "FUZZING 0/4"
-  mode_args=()
+  if [ -n "$VOLTRON_MODEL_BATCH" ]; then
+    set_stage "FUZZING 0/4: imported model batch $VOLTRON_MODEL_BATCH"
+    mode_args=(--model-batch "$VOLTRON_MODEL_BATCH")
+  else
+    set_stage "FUZZING 0/4"
+    mode_args=()
+  fi
 fi
 uv run cli.py \
   --sut "$VOLTRON_TARGET" \

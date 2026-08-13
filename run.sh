@@ -221,6 +221,8 @@ done
 CHATAFL_USE_API_GATEWAY=${CHATAFL_USE_API_GATEWAY:-1}
 VOLTRON_USE_API_GATEWAY=${VOLTRON_USE_API_GATEWAY:-1}
 VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
+VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
+VOLTRON_LEARNING_BUNDLE_DIR=${VOLTRON_LEARNING_BUNDLE_DIR:-}
 
 validate_gateway_switch() {
     local name=$1
@@ -249,6 +251,27 @@ if [[ "$uses_voltron" == "1" ]]; then
             ;;
     esac
     export VOLTRON_RUN_MODE
+    if [[ -n "$VOLTRON_MODEL_BATCH" ]]; then
+        if [[ "$VOLTRON_RUN_MODE" != "full" ]]; then
+            echo "VOLTRON_MODEL_BATCH requires VOLTRON_RUN_MODE=full." >&2
+            exit 1
+        fi
+        if [[ ! "$VOLTRON_MODEL_BATCH" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "VOLTRON_MODEL_BATCH must be a safe batch name." >&2
+            exit 1
+        fi
+        if [[ -z "$VOLTRON_LEARNING_BUNDLE_DIR" ]]; then
+            echo "VOLTRON_MODEL_BATCH requires VOLTRON_LEARNING_BUNDLE_DIR." >&2
+            exit 1
+        fi
+        if [[ ! -d "$VOLTRON_LEARNING_BUNDLE_DIR" ]]; then
+            printf 'VOLTRON_LEARNING_BUNDLE_DIR is not a directory: %s\n' \
+                "$VOLTRON_LEARNING_BUNDLE_DIR" >&2
+            exit 1
+        fi
+        VOLTRON_LEARNING_BUNDLE_DIR=$(realpath "$VOLTRON_LEARNING_BUNDLE_DIR")
+        export VOLTRON_MODEL_BATCH VOLTRON_LEARNING_BUNDLE_DIR
+    fi
 fi
 
 uses_api_gateway=0
@@ -500,6 +523,10 @@ fi
     printf 'fuzzers=%s\n' "$FUZZER_LIST"
     if [[ "$uses_voltron" == "1" ]]; then
         printf 'voltron_run_mode=%s\n' "$VOLTRON_RUN_MODE"
+        printf 'voltron_model_batch=%s\n' "${VOLTRON_MODEL_BATCH:-none}"
+        if [[ -n "${VOLTRON_MODEL_BATCH:-}" ]]; then
+            printf 'voltron_learning_bundle_dir=%s\n' "$VOLTRON_LEARNING_BUNDLE_DIR"
+        fi
     fi
     printf 'skipcount=%s\n' "$SKIPCOUNT"
     printf 'test_timeout_ms=%s\n' "$TEST_TIMEOUT"

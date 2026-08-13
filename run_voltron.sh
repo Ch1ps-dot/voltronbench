@@ -11,6 +11,8 @@ TIMEOUT=$6
 SKIPCOUNT=${7:-5}
 DELETE=${8:-}
 VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
+VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
+VOLTRON_LEARNING_BUNDLE_DIR=${VOLTRON_LEARNING_BUNDLE_DIR:-}
 
 case "$VOLTRON_RUN_MODE" in
   full|learn-export) ;;
@@ -19,6 +21,29 @@ case "$VOLTRON_RUN_MODE" in
     exit 2
     ;;
 esac
+
+if [ -n "$VOLTRON_MODEL_BATCH" ]; then
+  if [ "$VOLTRON_RUN_MODE" != full ]; then
+    printf 'VOLTRON_MODEL_BATCH requires VOLTRON_RUN_MODE=full.\n' >&2
+    exit 2
+  fi
+  case "$VOLTRON_MODEL_BATCH" in
+    *[!A-Za-z0-9._-]*|'')
+      printf 'VOLTRON_MODEL_BATCH must be a safe batch name.\n' >&2
+      exit 2
+      ;;
+  esac
+  if [ -z "$VOLTRON_LEARNING_BUNDLE_DIR" ]; then
+    printf 'VOLTRON_MODEL_BATCH requires VOLTRON_LEARNING_BUNDLE_DIR.\n' >&2
+    exit 2
+  fi
+  VOLTRON_LEARNING_BUNDLE_PATH="$VOLTRON_LEARNING_BUNDLE_DIR/$TARGET/learning_bundle.tar.gz"
+  if [ ! -r "$VOLTRON_LEARNING_BUNDLE_PATH" ]; then
+    printf 'VOLTRON: missing learning bundle for %s: %s\n' \
+      "$TARGET" "$VOLTRON_LEARNING_BUNDLE_PATH" >&2
+    exit 2
+  fi
+fi
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
 source "$ROOT/benchmark/scripts/execution/profuzzbench_monitor_common.sh"
@@ -222,6 +247,12 @@ if [[ "$VOLTRON_RUN_MODE" == "learn-export" ]] \
   printf 'VOLTRON: INCOMPATIBLE_VOLTRON_SNAPSHOT; --learn-and-export is missing\n' >&2
   exit 2
 fi
+if [[ -n "$VOLTRON_MODEL_BATCH" ]] \
+  && { ! grep -Fq -- '--import-learning-bundle' "$VOLTRON_SOURCE/cli.py" \
+    || ! grep -Fq -- '--model-batch' "$VOLTRON_SOURCE/cli.py"; }; then
+  printf 'VOLTRON: INCOMPATIBLE_VOLTRON_SNAPSHOT; model batch support is missing\n' >&2
+  exit 2
+fi
 UV_CACHE_ROOT=${VOLTRON_UV_CACHE_ROOT:-"$ROOT/.runtime/voltron/uv-cache"}
 UV_CACHE_TEMPLATE=${VOLTRON_UV_CACHE_TEMPLATE:-"$ROOT/.runtime/voltron/uv-cache-template"}
 UV_CACHE_MODE=${VOLTRON_UV_CACHE_MODE:-prewarmed-private}
@@ -386,6 +417,13 @@ for i in $(seq 1 "$RUNS"); do
     -e UV_CACHE_DIR=/home/ubuntu/.cache/uv
     -e UV_PYTHON_INSTALL_DIR=/home/ubuntu/.cache/uv/python
   )
+  if [ -n "$VOLTRON_MODEL_BATCH" ]; then
+    docker_args+=(
+      --mount "type=bind,src=${VOLTRON_LEARNING_BUNDLE_PATH},dst=/opt/voltron-learning-bundle.tar.gz,readonly"
+      -e "VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH}"
+      -e VOLTRON_LEARNING_BUNDLE_PATH=/opt/voltron-learning-bundle.tar.gz
+    )
+  fi
   if [ "$UV_CACHE_MODE" != legacy ]; then
     docker_args+=(-e UV_OFFLINE=1)
   fi
@@ -411,6 +449,8 @@ for i in $(seq 1 "$RUNS"); do
   fi
   for env_name in \
     VOLTRON_RUN_MODE \
+    VOLTRON_MODEL_BATCH \
+    VOLTRON_LEARNING_BUNDLE_PATH \
     VOLTRON_STATS_INTERVAL \
     VOLTRON_COMPLIANCE_ANALYZER \
     VOLTRON_RUN_COMPLIANCE_ANALYSIS \

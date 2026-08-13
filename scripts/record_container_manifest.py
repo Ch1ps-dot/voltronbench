@@ -126,6 +126,9 @@ def main() -> int:
             "voltron_run_mode",
             "learning_export_status",
             "learning_bundle_sha256",
+            "model_import_status",
+            "model_import_bundle_sha256",
+            "model_batch",
             "voltron_source_commit",
             "lifecycle_mode",
         ):
