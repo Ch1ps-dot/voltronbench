@@ -229,6 +229,15 @@ verify_subject_lifecycle_override() {
     return 1
   fi
 
+  if [[ "$TARGET" == live555 ]] \
+    && { ! grep -Fq 'cd /home/ubuntu/experiments/live/testProgs' \
+          config/subjects/live555/run.sh \
+      || ! grep -Fq 'exec ./testOnDemandRTSPServer 8554' \
+          config/subjects/live555/run.sh; }; then
+    printf 'VOLTRON: Live555 lifecycle override did not start from the media directory\n' >&2
+    return 1
+  fi
+
   if [[ "$TARGET" == exim ]] \
     && { ! grep -Fq 'exec /usr/exim/bin/exim' config/subjects/exim/run.sh \
       || ! grep -Fq 'readiness_script: ready.sh' config/configs.yaml \

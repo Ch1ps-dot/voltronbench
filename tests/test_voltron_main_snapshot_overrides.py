@@ -42,6 +42,7 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
             "forked-daapd": {"setup.sh", "run.sh"},
             "kamailio": {"setup.sh", "run.sh", "pjsua_lifecycle.sh"},
             "lightftp": {"setup.sh", "run.sh"},
+            "live555": {"run.sh"},
             "pure-ftpd": {"setup.sh"},
         }
         overrides = EXECUTION_DIR / "voltron-subject-overrides"
@@ -64,6 +65,23 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
 
         self.assertIn("exec /home/ubuntu/experiments/bftpd/bftpd", run_script)
         self.assertIn("/home/ubuntu/experiments/basic.conf", run_script)
+
+    def test_live555_override_starts_server_from_media_directory(self) -> None:
+        run_script = (
+            EXECUTION_DIR / "voltron-subject-overrides" / "live555" / "run.sh"
+        ).read_text(encoding="utf-8")
+        container_runner = (
+            EXECUTION_DIR / "profuzzbench_voltron_container.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("set -eu", run_script)
+        self.assertIn("cd /home/ubuntu/experiments/live/testProgs", run_script)
+        self.assertIn("test.aac test.ac3 test.mpg", run_script)
+        self.assertIn("exec ./testOnDemandRTSPServer 8554", run_script)
+        self.assertIn(
+            "Live555 lifecycle override did not start from the media directory",
+            container_runner,
+        )
 
     def test_exim_setup_is_idempotent_and_pid_scoped(self) -> None:
         setup = EXECUTION_DIR / "voltron-subject-overrides" / "exim" / "setup.sh"
