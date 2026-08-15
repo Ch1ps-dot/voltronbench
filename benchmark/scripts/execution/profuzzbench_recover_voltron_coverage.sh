@@ -12,7 +12,7 @@ ARCHIVE=
 TARGET=
 IMAGE=
 SKIPCOUNT=5
-REPLAY_TIMEOUT=7200
+CASE_TIMEOUT=30
 DRY_RUN=0
 
 usage() {
@@ -29,7 +29,7 @@ Options:
   --image IMAGE        override collector image (default target Voltron image)
   --output-root DIR    directory for recovered packages (default coverage-recovery)
   --skipcount N        coverage sampling interval (default 5)
-  --replay-timeout N   seconds allowed for coverage replay (default 7200)
+  --case-timeout N     seconds allowed for each replayed sequence (default 30)
   --dry-run            validate archive and print the recovery plan
   -h, --help           show this help
 EOF
@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
     --image) IMAGE=${2:-}; shift 2 ;;
     --output-root) OUTPUT_ROOT=${2:-}; shift 2 ;;
     --skipcount) SKIPCOUNT=${2:-}; shift 2 ;;
-    --replay-timeout) REPLAY_TIMEOUT=${2:-}; shift 2 ;;
+    --case-timeout) CASE_TIMEOUT=${2:-}; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
@@ -53,7 +53,7 @@ done
 
 [[ -n "$ARCHIVE" && -f "$ARCHIVE" ]] || die "--archive must name a readable file"
 [[ "$SKIPCOUNT" =~ ^[1-9][0-9]*$ ]] || die "--skipcount must be a positive integer"
-[[ "$REPLAY_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "--replay-timeout must be a positive integer"
+[[ "$CASE_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "--case-timeout must be a positive integer"
 command -v docker >/dev/null 2>&1 || die "docker is required"
 
 first_archive_root() (
@@ -151,7 +151,7 @@ if [[ "$TARGET" == forked-daapd ]]; then
     -- "$TARGET" /recovery "$SKIPCOUNT")
 fi
 
-if ! timeout --preserve-status "$REPLAY_TIMEOUT" docker exec "$collector_id" \
+if ! docker exec -e "VOLTRON_REPLAY_CASE_TIMEOUT_SECONDS=$CASE_TIMEOUT" "$collector_id" \
   "${collector_command[@]}" \
   >"$case_dir/coverage-replay.log" 2>&1; then
   printf 'coverage replay failed; see %s\n' "$case_dir/coverage-replay.log" >&2

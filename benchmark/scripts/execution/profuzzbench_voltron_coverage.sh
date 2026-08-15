@@ -5,6 +5,7 @@ set -u
 TARGET=$1
 RESULT_DIR=$2
 SKIPCOUNT=${3:-1}
+CASE_TIMEOUT=${VOLTRON_REPLAY_CASE_TIMEOUT_SECONDS:-30}
 WORKDIR=${WORKDIR:-/home/ubuntu/experiments}
 COVFILE="${RESULT_DIR}/cov_over_time.csv"
 REPLAY_DIR="${RESULT_DIR}/replayable-queue"
@@ -29,9 +30,17 @@ if [[ ! "$SKIPCOUNT" =~ ^[1-9][0-9]*$ ]]; then
     echo "VOLTRON coverage: invalid SKIPCOUNT: $SKIPCOUNT" >&2
     exit 2
 fi
+if [[ ! "$CASE_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+    echo "VOLTRON coverage: invalid per-sequence timeout: $CASE_TIMEOUT" >&2
+    exit 2
+fi
 
 if ! command -v aflnet-replay > /dev/null 2>&1; then
     echo "VOLTRON coverage: aflnet-replay is unavailable" >&2
+    exit 2
+fi
+if ! command -v timeout > /dev/null 2>&1; then
+    echo "VOLTRON coverage: timeout is unavailable" >&2
     exit 2
 fi
 if [[ ! -r /opt/voltron-target-cov-script.sh ]]; then
@@ -46,6 +55,21 @@ if (( ${#testcases[@]} == 0 )); then
     write_empty_coverage
     exit 0
 fi
+
+# Target scripts invoke aflnet-replay directly.  Put a short-lived wrapper at
+# the front of PATH so every saved sequence is bounded without changing their
+# target-specific server lifetimes or imposing a cap on the complete corpus.
+replayer_bin=$(command -v aflnet-replay)
+replayer_wrapper_dir=$(mktemp -d /tmp/voltron-aflnet-replay.XXXXXX)
+cleanup_replayer_wrapper() { rm -rf "$replayer_wrapper_dir"; }
+trap cleanup_replayer_wrapper EXIT
+cat > "$replayer_wrapper_dir/aflnet-replay" <<'EOF'
+#!/bin/bash
+exec timeout --kill-after=1s "${VOLTRON_REPLAY_CASE_TIMEOUT_SECONDS}" "${VOLTRON_AFLNET_REPLAY_BIN}" "$@"
+EOF
+chmod 0755 "$replayer_wrapper_dir/aflnet-replay"
+export VOLTRON_AFLNET_REPLAY_BIN="$replayer_bin"
+export VOLTRON_REPLAY_CASE_TIMEOUT_SECONDS="$CASE_TIMEOUT"
 
 case "$TARGET" in
     live555)
@@ -100,7 +124,7 @@ fi
 
 echo "VOLTRON coverage: replaying ${#testcases[@]} test cases for $TARGET"
 cd "$COVERAGE_DIR"
-if ! /bin/bash /opt/voltron-target-cov-script.sh \
+if ! PATH="$replayer_wrapper_dir:$PATH" /bin/bash /opt/voltron-target-cov-script.sh \
     "$RESULT_DIR" "$PORT" "$SKIPCOUNT" "$COVFILE" 1; then
     echo "VOLTRON coverage: target coverage replay failed" >&2
     exit 1
