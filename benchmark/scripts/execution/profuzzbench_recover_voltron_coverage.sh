@@ -6,6 +6,7 @@
 set -Eeuo pipefail
 
 readonly SCRIPT_NAME=${0##*/}
+readonly BENCH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 OUTPUT_ROOT="$PWD/coverage-recovery"
 ARCHIVE=
 TARGET=
@@ -86,6 +87,21 @@ if [[ -z "$IMAGE" ]]; then
   esac
 fi
 
+coverage_script="$BENCH_ROOT/benchmark/scripts/execution/profuzzbench_voltron_coverage.sh"
+case "$TARGET" in
+  exim) target_cov_script="$BENCH_ROOT/benchmark/subjects/SMTP/Exim/cov_script.sh" ;;
+  forked-daapd) target_cov_script="$BENCH_ROOT/benchmark/subjects/DAAP/forked-daapd/cov_script.sh" ;;
+  kamailio) target_cov_script="$BENCH_ROOT/benchmark/subjects/SIP/Kamailio/cov_script.sh" ;;
+  lightftp) target_cov_script="$BENCH_ROOT/benchmark/subjects/FTP/LightFTP/cov_script.sh" ;;
+  lighttpd1) target_cov_script="$BENCH_ROOT/benchmark/subjects/HTTP/Lighttpd1/cov_script.sh" ;;
+  live555) target_cov_script="$BENCH_ROOT/benchmark/subjects/RTSP/Live555/cov_script.sh" ;;
+  proftpd) target_cov_script="$BENCH_ROOT/benchmark/subjects/FTP/ProFTPD/cov_script.sh" ;;
+  pure-ftpd) target_cov_script="$BENCH_ROOT/benchmark/subjects/FTP/PureFTPD/cov_script.sh" ;;
+  bftpd) target_cov_script="$BENCH_ROOT/benchmark/subjects/FTP/BFTPD/cov_script.sh" ;;
+esac
+[[ -r "$coverage_script" ]] || die "missing Voltron coverage wrapper: $coverage_script"
+[[ -r "$target_cov_script" ]] || die "missing target coverage script: $target_cov_script"
+
 if ! archive_has_member "^${root}/replayable-queue/"; then
   die "archive has no replayable-queue; run fuzz-only/full collection with queue export first"
 fi
@@ -121,16 +137,32 @@ collector_id=$(docker run --init -d --user root \
   --label voltronbench.coverage-recovery=true \
   --label "voltronbench.coverage-source-sha256=$archive_sha256" \
   -v "$raw_dir:/recovery:rw" \
+  -v "$coverage_script:/opt/voltron-coverage.sh:ro" \
+  -v "$target_cov_script:/opt/voltron-target-cov-script.sh:ro" \
   --entrypoint /bin/bash "$IMAGE" -lc 'while :; do sleep 3600; done')
 
 printf 'target=%s\nimage=%s\narchive=%s\narchive_sha256=%s\n' \
   "$TARGET" "$IMAGE" "$ARCHIVE" "$archive_sha256" > "$case_dir/provenance.txt"
 
+collector_command=(/bin/bash /opt/voltron-coverage.sh "$TARGET" /recovery "$SKIPCOUNT")
+if [[ "$TARGET" == forked-daapd ]]; then
+  collector_command=(/bin/bash -lc \
+    '/etc/init.d/dbus start || true; /etc/init.d/avahi-daemon start || true; exec /bin/bash /opt/voltron-coverage.sh "$@"' \
+    -- "$TARGET" /recovery "$SKIPCOUNT")
+fi
+
 if ! timeout --preserve-status "$REPLAY_TIMEOUT" docker exec "$collector_id" \
-  /bin/bash /opt/voltron-coverage.sh "$TARGET" /recovery "$SKIPCOUNT" \
+  "${collector_command[@]}" \
   >"$case_dir/coverage-replay.log" 2>&1; then
   printf 'coverage replay failed; see %s\n' "$case_dir/coverage-replay.log" >&2
   exit 1
+fi
+
+# Collectors run as root for targets whose coverage scripts need service setup.
+# Return the bind-mounted result tree to the invoking user before packaging it
+# on the host, so a successful replay cannot fail only at the archive step.
+if ! docker exec "$collector_id" chown -R "$(id -u):$(id -g)" /recovery; then
+  die "could not restore ownership of recovered coverage output"
 fi
 
 [[ -s "$raw_dir/cov_over_time.csv" ]] || die "coverage replay did not produce cov_over_time.csv"
