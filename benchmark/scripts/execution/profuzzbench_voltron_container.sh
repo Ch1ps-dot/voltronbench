@@ -14,6 +14,7 @@ STATUS_SAMPLE_INTERVAL=${VOLTRON_STATUS_SAMPLE_INTERVAL_SECONDS:-$STATS_INTERVAL
 COMPLIANCE_ANALYZER=${VOLTRON_COMPLIANCE_ANALYZER:-analyze_compliance.py}
 RUN_COMPLIANCE_ANALYSIS=${VOLTRON_RUN_COMPLIANCE_ANALYSIS:-0}
 VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
+VOLTRON_POSTPROCESS_MODE=${VOLTRON_POSTPROCESS_MODE:-full}
 VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
 VOLTRON_LEARNING_BUNDLE_PATH=${VOLTRON_LEARNING_BUNDLE_PATH:-}
 TIMEOUT_MINUTES=$(( (TIMEOUT_SECONDS + 59) / 60 ))
@@ -30,6 +31,14 @@ case "$VOLTRON_RUN_MODE" in
   full|learn-export) ;;
   *)
     printf 'VOLTRON: VOLTRON_RUN_MODE must be full or learn-export\n' >&2
+    exit 2
+    ;;
+esac
+
+case "$VOLTRON_POSTPROCESS_MODE" in
+  full|fuzz-only) ;;
+  *)
+    printf 'VOLTRON: VOLTRON_POSTPROCESS_MODE must be full or fuzz-only\n' >&2
     exit 2
     ;;
 esac
@@ -601,6 +610,7 @@ write_postprocess_status() {
     "$COVERAGE_STATUS" \
     "$COMPONENT_EXPORT_STATUS" \
     "$VOLTRON_RUN_MODE" \
+    "$VOLTRON_POSTPROCESS_MODE" \
     "$LEARNING_EXPORT_STATUS" \
     "$LEARNING_BUNDLE_SHA256" \
     "$MODEL_IMPORT_STATUS" \
@@ -623,6 +633,7 @@ from pathlib import Path
     coverage_status,
     component_export_status,
     run_mode,
+    postprocess_mode,
     learning_export_status,
     learning_bundle_sha256,
     model_import_status,
@@ -643,6 +654,7 @@ payload = {
     "component_export_status": "COMPLETED"
     if int(component_export_status) == 0 else "PARTIAL",
     "voltron_run_mode": run_mode,
+    "voltron_postprocess_mode": postprocess_mode,
     "learning_export_status": learning_export_status,
     "learning_bundle_sha256": learning_bundle_sha256,
     "model_import_status": model_import_status,
@@ -725,6 +737,17 @@ run_code_coverage() {
     --result-dir "$result_dir" || return
   /bin/bash /opt/voltron-coverage.sh \
     "$TARGET" "$result_dir" "$SKIPCOUNT"
+}
+
+export_replay_queue() {
+  local result_dir
+
+  result_dir=$(realpath "$OUTDIR")
+  set_stage "FINALIZING 2/4: exporting Voltron replay queue"
+  printf 'Exporting Voltron test cases for deferred AFLNet coverage replay\n'
+  PYTHONPATH="$VOLTRON_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+    uv run python /opt/voltron-export-aflnet-replay.py \
+    --result-dir "$result_dir"
 }
 
 STATUS=255
@@ -875,12 +898,22 @@ else
   run_compliance_analysis
   COMPLIANCE_STATUS=$?
 
-  run_code_coverage
-  COVERAGE_STATUS=$?
-  if [ "$COVERAGE_STATUS" -eq 0 ]; then
-    COVERAGE_STATE=COMPLETED
+  if [ "$VOLTRON_POSTPROCESS_MODE" = fuzz-only ]; then
+    if export_replay_queue; then
+      COVERAGE_STATE=DEFERRED
+      COVERAGE_STATUS=0
+    else
+      COVERAGE_STATE=DEFERRED_EXPORT_FAILED
+      COVERAGE_STATUS=$?
+    fi
   else
-    COVERAGE_STATE=FAILED
+    run_code_coverage
+    COVERAGE_STATUS=$?
+    if [ "$COVERAGE_STATUS" -eq 0 ]; then
+      COVERAGE_STATE=COMPLETED
+    else
+      COVERAGE_STATE=FAILED
+    fi
   fi
 fi
 
