@@ -10,6 +10,7 @@ SKIPCOUNT=${4:-1}
 VOLTRON_SOURCE=${VOLTRON_SOURCE:-/opt/voltron-src}
 VOLTRON_DIR=${VOLTRON_DIR:-/home/ubuntu/voltron-runtime}
 STATS_INTERVAL=${VOLTRON_STATS_INTERVAL:-10}
+STATUS_SAMPLE_INTERVAL=${VOLTRON_STATUS_SAMPLE_INTERVAL_SECONDS:-$STATS_INTERVAL}
 COMPLIANCE_ANALYZER=${VOLTRON_COMPLIANCE_ANALYZER:-analyze_compliance.py}
 RUN_COMPLIANCE_ANALYSIS=${VOLTRON_RUN_COMPLIANCE_ANALYSIS:-0}
 VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
@@ -32,6 +33,17 @@ case "$VOLTRON_RUN_MODE" in
     exit 2
     ;;
 esac
+
+for interval_spec in \
+  "VOLTRON_STATS_INTERVAL=$STATS_INTERVAL" \
+  "VOLTRON_STATUS_SAMPLE_INTERVAL_SECONDS=$STATUS_SAMPLE_INTERVAL"; do
+  interval_name=${interval_spec%%=*}
+  interval_value=${interval_spec#*=}
+  if ! [[ "$interval_value" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'VOLTRON: %s must be a positive integer\n' "$interval_name" >&2
+    exit 2
+  fi
+done
 
 if [ -n "$VOLTRON_MODEL_BATCH" ]; then
   if [ "$VOLTRON_RUN_MODE" != full ]; then
@@ -145,16 +157,20 @@ apply_subject_overrides
 apply_forked_daapd_timeout_overrides() {
   local config=config/configs.yaml
   local setup_timeout=${VOLTRON_FORKED_DAAPD_SETUP_TIMEOUT_SECONDS:-}
+  # Newer Voltron snapshots use a dedicated socket-readiness budget rather
+  # than deriving it from setup_timeout_seconds. Keep a 30-second window
+  # unless an experiment overrides it explicitly.
+  local socket_timeout=${VOLTRON_FORKED_DAAPD_SOCKET_READINESS_TIMEOUT_SECONDS:-${setup_timeout:-30}}
   # The historical five-second HTTP probe limit was reached under normal
   # concurrent load.  Keep a target-scoped ten-second default while allowing
   # an experiment to override it explicitly.
   local readiness_timeout=${VOLTRON_FORKED_DAAPD_READINESS_TIMEOUT_SECONDS:-10}
 
   [ "$TARGET" = forked-daapd ] || return 0
-  python3 - "$config" "$setup_timeout" "$readiness_timeout" <<'PYTHON'
+  python3 - "$config" "$setup_timeout" "$socket_timeout" "$readiness_timeout" <<'PYTHON'
 import re
 import sys
-path, setup_value, readiness_value = sys.argv[1:]
+path, setup_value, socket_value, readiness_value = sys.argv[1:]
 def valid(value, name):
     if not value:
         return None
@@ -166,13 +182,18 @@ def valid(value, name):
         raise SystemExit(f"VOLTRON: {name} must be a positive number")
     return value
 setup_value = valid(setup_value, "VOLTRON_FORKED_DAAPD_SETUP_TIMEOUT_SECONDS")
+socket_value = valid(socket_value, "VOLTRON_FORKED_DAAPD_SOCKET_READINESS_TIMEOUT_SECONDS")
 readiness_value = valid(readiness_value, "VOLTRON_FORKED_DAAPD_READINESS_TIMEOUT_SECONDS")
 text = open(path, encoding="utf-8").read()
 match = re.search(r"^forked-daapd:\n(?P<body>(?:^[ ]{2}.*\n)*)", text, re.M)
 if match is None:
     raise SystemExit("VOLTRON: forked-daapd target configuration is missing")
 body = match.group("body")
-for key, value in (("setup_timeout_seconds", setup_value), ("readiness_timeout_seconds", readiness_value)):
+for key, value in (
+    ("setup_timeout_seconds", setup_value),
+    ("socket_readiness_timeout_seconds", socket_value),
+    ("readiness_timeout_seconds", readiness_value),
+):
     if value is None:
         continue
     line = f"  {key}: {value}\n"
@@ -185,7 +206,7 @@ with open(path, "w", encoding="utf-8") as handle:
     handle.write(text)
 PYTHON
   printf 'VOLTRON: forked-daapd timeouts: socket=%ss http=%ss\n' \
-    "${setup_timeout:-default}" "${readiness_timeout:-default}"
+    "$socket_timeout" "$readiness_timeout"
 }
 
 apply_forked_daapd_timeout_overrides
@@ -315,6 +336,11 @@ apply_forked_daapd_readiness_runtime_patch() {
 
   [ "$TARGET" = forked-daapd ] || return 0
   [ -r "$patch_file" ] || return 0
+  if grep -Fq 'def _wait_for_socket_readiness' voltron/executor/executor.py \
+    && grep -Fq 'socket_readiness_timeout_s' voltron/executor/executor.py; then
+    printf 'VOLTRON: native forked-daapd socket readiness timeout support is present\n'
+    return 0
+  fi
   if grep -Fq 'self.setup_time_s, self.setup_timeout_s, 100 * self.setup_time_s' \
     voltron/executor/executor.py; then
     printf 'VOLTRON: forked-daapd socket readiness runtime patch is already present\n'
@@ -361,6 +387,18 @@ replace_llm_setting base_url "$VOLTRON_LLM_BASE_URL"
 replace_llm_setting api_key "$VOLTRON_LLM_API_KEY"
 replace_llm_setting model "$VOLTRON_LLM_MODEL"
 
+case "$OUTDIR" in
+  ''|/|.)
+    printf 'VOLTRON: refusing unsafe output directory: %s\n' "$OUTDIR" >&2
+    exit 2
+    ;;
+esac
+if [ -e "$OUTDIR" ] && [ "${VOLTRON_ALLOW_OUTPUT_OVERWRITE:-0}" != 1 ]; then
+  if find "$OUTDIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+    printf 'VOLTRON: output directory already contains results: %s (set VOLTRON_ALLOW_OUTPUT_OVERWRITE=1 to replace it)\n' "$OUTDIR" >&2
+    exit 2
+  fi
+fi
 rm -rf "$OUTDIR"
 mkdir -p "$OUTDIR"
 
@@ -382,9 +420,13 @@ else
 fi
 
 PLOT_DATA="$OUTDIR/plot_data"
+STATUS_DATA="$OUTDIR/voltron_status_metrics.csv"
 STAGE_FILE="$OUTDIR/.profuzzbench-stage"
 cat > "$PLOT_DATA" <<'EOF'
 # unix_time, cycles_done, cur_path, paths_total, pending_total, pending_favs, map_size, unique_crashes, unique_hangs, max_depth, execs_per_sec, n_nodes, n_edges, chat_times
+EOF
+cat > "$STATUS_DATA" <<'EOF'
+unix_time,status_mtime,exec_path_num,crash_num,distinct_resp,resp_transitions,chat_token
 EOF
 
 set_stage() {
@@ -393,20 +435,35 @@ set_stage() {
 
 record_status() {
   local status_file="$OUTDIR/fuzzer_status"
-  local timestamp paths crashes nodes edges chat_tokens
+  local timestamp status_mtime paths crashes nodes edges chat_tokens
 
   [ -f "$status_file" ] || return 0
 
+  # The producer may replace this file while it is being written.  Accept a
+  # sample only when every consumed metric is present and numeric; never turn
+  # an incomplete snapshot into a misleading zero-valued data point.
   timestamp=$(date +%s)
+  status_mtime=$(stat -c %Y "$status_file" 2>/dev/null || printf 0)
   paths=$(awk -F: '/^exec_path_num/ {gsub(/[[:space:]]/, "", $2); print $2}' "$status_file")
   crashes=$(awk -F: '/^crash_num/ {gsub(/[[:space:]]/, "", $2); print $2}' "$status_file")
   nodes=$(awk -F: '/^distinct_resp/ {gsub(/[[:space:]]/, "", $2); print $2}' "$status_file")
   edges=$(awk -F: '/^resp_transitions/ {gsub(/[[:space:]]/, "", $2); print $2}' "$status_file")
   chat_tokens=$(awk -F: '/^chat_token/ {gsub(/[[:space:]]/, "", $2); print $2}' "$status_file")
 
-  printf '%s, 0, 0, %s, 0, 0, 0, %s, 0, 0, 0, %s, %s, %s\n' \
-    "$timestamp" "${paths:-0}" "${crashes:-0}" "${nodes:-0}" "${edges:-0}" \
-    "${chat_tokens:-0}" >> "$PLOT_DATA"
+  for metric in "$paths" "$crashes" "$nodes" "$edges" "$chat_tokens"; do
+    if ! [[ "$metric" =~ ^[0-9]+$ ]]; then
+      printf 'VOLTRON: ignoring incomplete fuzzer_status snapshot at %s\n' "$timestamp" >&2
+      return 0
+    fi
+  done
+  printf '%s,%s,%s,%s,%s,%s,%s\n' \
+    "$timestamp" "$status_mtime" "$paths" "$crashes" "$nodes" "$edges" \
+    "$chat_tokens" >> "$STATUS_DATA"
+  # plot_data retains the historical ProFuzzBench layout.  Only fields backed
+  # by fuzzer_status are populated; exact Voltron metrics live in STATUS_DATA.
+  printf '%s, 0, %s, %s, 0, 0, 0, %s, 0, 0, 0, %s, %s, %s\n' \
+    "$timestamp" "$paths" "$paths" "$crashes" "$nodes" "$edges" \
+    "$chat_tokens" >> "$PLOT_DATA"
 }
 
 export_synthesized_component() {
@@ -697,7 +754,72 @@ import_model_batch() {
   return 1
 }
 
+validate_imported_model_alphabet() {
+  local report="$OUTDIR/model_import_compatibility.json"
+  local model_root="component/models/$VOLTRON_TARGET/$VOLTRON_MODEL_BATCH"
+
+  [ -n "$VOLTRON_MODEL_BATCH" ] || return 0
+  # A bundle can be structurally valid but still predate a changed request IR.
+  # Verify the active generator alphabet before the fuzzer samples a missing
+  # request type (for example, Exim ETRN), which otherwise fails at runtime.
+  if ! python3 - "$VOLTRON_TARGET" "$model_root" "component/ir" \
+      "config/configs.yaml" "$report" <<'PYTHON'
+import json
+import re
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+target, model_root, ir_root, config_path, report_path = map(Path, sys.argv[1:])
+target_name = target.name
+text = config_path.read_text(encoding="utf-8")
+match = re.search(
+    rf"(?ms)^{re.escape(target_name)}:\n(?P<body>(?:^[ ]{{2}}.*\n)*)",
+    text,
+)
+if match is None:
+    raise SystemExit(f"target configuration is missing: {target_name}")
+protocol_match = re.search(r"^  protocol:\s*([^\s#]+)", match.group("body"), re.M)
+if protocol_match is None:
+    raise SystemExit(f"target protocol is missing: {target_name}")
+protocol = protocol_match.group(1)
+ir_path = ir_root / protocol / "req_ir.xml"
+info_path = model_root / "equipment" / "generators" / "generator_info.json"
+if not ir_path.is_file() or not info_path.is_file():
+    raise SystemExit("request IR or imported generator metadata is missing")
+expected = {
+    message.attrib["name"]
+    for message in ET.parse(ir_path).getroot().iter("message")
+    if message.attrib.get("name")
+}
+available = set(json.loads(info_path.read_text(encoding="utf-8")))
+missing = sorted(expected - available)
+payload = {
+    "target": target_name,
+    "protocol": protocol,
+    "request_types": sorted(expected),
+    "generator_types": sorted(available),
+    "missing_generator_types": missing,
+    "status": "COMPLETED" if not missing else "INCOMPATIBLE",
+}
+report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+if missing:
+    raise SystemExit(
+        "imported bundle lacks generators for current request IR: " + ", ".join(missing)
+    )
+PYTHON
+  then
+    MODEL_IMPORT_STATUS=INCOMPATIBLE
+    printf 'VOLTRON: MODEL_IMPORT_ALPHABET_MISMATCH; see %s\n' "$report" >&2
+    return 1
+  fi
+}
+
 if ! import_model_batch; then
+  exit 2
+fi
+
+if ! validate_imported_model_alphabet; then
   exit 2
 fi
 
@@ -720,12 +842,13 @@ uv run cli.py \
   --output "$OUTDIR" "${mode_args[@]}" &
 FUZZ_PID=$!
 
-sample_count=0
+last_status_sample=0
 while kill -0 "$FUZZ_PID" 2>/dev/null; do
-  if (( sample_count % SKIPCOUNT == 0 )); then
+  now=$(date +%s)
+  if (( now - last_status_sample >= STATUS_SAMPLE_INTERVAL )); then
     record_status
+    last_status_sample=$now
   fi
-  sample_count=$((sample_count + 1))
   sleep "$STATS_INTERVAL"
 done
 
@@ -764,7 +887,16 @@ fi
 write_postprocess_status
 
 set_stage "PACKAGING 3/4: creating archive"
-tar -zcf "${OUTDIR}.tar.gz" "$OUTDIR"
+archive_tmp="${OUTDIR}.tar.gz.tmp"
+archive_path="${OUTDIR}.tar.gz"
+rm -f "$archive_tmp"
+if ! tar -zcf "$archive_tmp" "$OUTDIR"; then
+  rm -f "$archive_tmp"
+  set_stage "FAILED 3/4: archive creation"
+  exit 1
+fi
+mv -f "$archive_tmp" "$archive_path"
+sha256sum "$archive_path" > "${archive_path}.sha256"
 set_stage "ARCHIVE READY 4/4"
 if [ "$STATUS" -ne 0 ]; then
   exit "$STATUS"
