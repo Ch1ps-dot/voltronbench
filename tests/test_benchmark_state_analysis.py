@@ -125,6 +125,40 @@ class StateCsvConversionTests(unittest.TestCase):
                 [("nodes", "5"), ("edges", "7")],
             )
 
+    def test_voltron_deferred_coverage_still_exports_state_data(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "out-demo-voltron"
+            output.mkdir()
+            (output / "states.csv").write_text(
+                "subject,fuzzer,data_type,time,data,event\n"
+                "demo,voltron,nodes,100,5,new_response_type\n"
+                "demo,voltron,edges,100,7,new_response_transition\n",
+                encoding="utf-8",
+            )
+            (output / "postprocess_status.json").write_text(
+                '{"coverage_status": "DEFERRED"}\n', encoding="utf-8"
+            )
+            with tarfile.open(root / "out-demo-voltron_1.tar.gz", "w:gz") as archive:
+                archive.add(output, arcname=output.name)
+
+            result = self._run_conversion(root, "voltron")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(
+                (root / ".profuzzbench-coverage-deferred-voltron").is_file()
+            )
+            self.assertEqual(
+                (root / "results.csv").read_text(encoding="utf-8").splitlines(),
+                ["time,subject,fuzzer,run,cov_type,cov"],
+            )
+            with (root / "states.csv").open(newline="", encoding="utf-8") as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual(
+                [(row["state_type"], row["state"]) for row in rows],
+                [("nodes", "5"), ("edges", "7")],
+            )
+
     def test_rejects_stateafl_archive_without_response_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

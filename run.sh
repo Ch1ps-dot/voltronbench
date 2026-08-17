@@ -223,6 +223,11 @@ VOLTRON_USE_API_GATEWAY=${VOLTRON_USE_API_GATEWAY:-1}
 VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
 VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
 VOLTRON_LEARNING_BUNDLE_DIR=${VOLTRON_LEARNING_BUNDLE_DIR:-}
+VOLTRON_NO_SPEC_KNOWLEDGE=${VOLTRON_NO_SPEC_KNOWLEDGE:-0}
+VOLTRON_NO_STATE_LEARNING=${VOLTRON_NO_STATE_LEARNING:-0}
+VOLTRON_NO_GUIDED_SCHEDULING=${VOLTRON_NO_GUIDED_SCHEDULING:-0}
+VOLTRON_OFFLINE_MUTATOR_ONLY=${VOLTRON_OFFLINE_MUTATOR_ONLY:-0}
+VOLTRON_NO_LOAD_AFLNET_SEEDS=${VOLTRON_NO_LOAD_AFLNET_SEEDS:-0}
 
 validate_gateway_switch() {
     local name=$1
@@ -251,6 +256,21 @@ if [[ "$uses_voltron" == "1" ]]; then
             ;;
     esac
     export VOLTRON_RUN_MODE
+    for voltron_option in \
+        VOLTRON_NO_SPEC_KNOWLEDGE \
+        VOLTRON_NO_STATE_LEARNING \
+        VOLTRON_NO_GUIDED_SCHEDULING \
+        VOLTRON_OFFLINE_MUTATOR_ONLY \
+        VOLTRON_NO_LOAD_AFLNET_SEEDS; do
+        validate_gateway_switch "$voltron_option" "${!voltron_option}"
+        export "$voltron_option"
+    done
+    VOLTRON_NO_STATE_LEARNING_EFFECTIVE=$VOLTRON_NO_STATE_LEARNING
+    VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=$VOLTRON_NO_GUIDED_SCHEDULING
+    if [[ "$VOLTRON_OFFLINE_MUTATOR_ONLY" == "1" ]]; then
+        VOLTRON_NO_STATE_LEARNING_EFFECTIVE=1
+        VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=1
+    fi
     if [[ -n "$VOLTRON_MODEL_BATCH" ]]; then
         if [[ "$VOLTRON_RUN_MODE" != "full" ]]; then
             echo "VOLTRON_MODEL_BATCH requires VOLTRON_RUN_MODE=full." >&2
@@ -524,6 +544,11 @@ fi
     if [[ "$uses_voltron" == "1" ]]; then
         printf 'voltron_run_mode=%s\n' "$VOLTRON_RUN_MODE"
         printf 'voltron_model_batch=%s\n' "${VOLTRON_MODEL_BATCH:-none}"
+        printf 'voltron_no_spec_knowledge=%s\n' "$VOLTRON_NO_SPEC_KNOWLEDGE"
+        printf 'voltron_no_state_learning=%s\n' "$VOLTRON_NO_STATE_LEARNING_EFFECTIVE"
+        printf 'voltron_no_guided_scheduling=%s\n' "$VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE"
+        printf 'voltron_offline_mutator_only=%s\n' "$VOLTRON_OFFLINE_MUTATOR_ONLY"
+        printf 'voltron_no_load_aflnet_seeds=%s\n' "$VOLTRON_NO_LOAD_AFLNET_SEEDS"
         if [[ -n "${VOLTRON_MODEL_BATCH:-}" ]]; then
             printf 'voltron_learning_bundle_dir=%s\n' "$VOLTRON_LEARNING_BUNDLE_DIR"
         fi

@@ -17,6 +17,11 @@ VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
 VOLTRON_POSTPROCESS_MODE=${VOLTRON_POSTPROCESS_MODE:-fuzz-only}
 VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
 VOLTRON_LEARNING_BUNDLE_PATH=${VOLTRON_LEARNING_BUNDLE_PATH:-}
+VOLTRON_NO_SPEC_KNOWLEDGE=${VOLTRON_NO_SPEC_KNOWLEDGE:-0}
+VOLTRON_NO_STATE_LEARNING=${VOLTRON_NO_STATE_LEARNING:-0}
+VOLTRON_NO_GUIDED_SCHEDULING=${VOLTRON_NO_GUIDED_SCHEDULING:-0}
+VOLTRON_OFFLINE_MUTATOR_ONLY=${VOLTRON_OFFLINE_MUTATOR_ONLY:-0}
+VOLTRON_NO_LOAD_AFLNET_SEEDS=${VOLTRON_NO_LOAD_AFLNET_SEEDS:-0}
 TIMEOUT_MINUTES=$(( (TIMEOUT_SECONDS + 59) / 60 ))
 
 case "$RUN_COMPLIANCE_ANALYSIS" in
@@ -42,6 +47,28 @@ case "$VOLTRON_POSTPROCESS_MODE" in
     exit 2
     ;;
 esac
+
+for voltron_option in \
+  VOLTRON_NO_SPEC_KNOWLEDGE \
+  VOLTRON_NO_STATE_LEARNING \
+  VOLTRON_NO_GUIDED_SCHEDULING \
+  VOLTRON_OFFLINE_MUTATOR_ONLY \
+  VOLTRON_NO_LOAD_AFLNET_SEEDS; do
+  case "${!voltron_option}" in
+    0|1) ;;
+    *)
+      printf 'VOLTRON: %s must be 0 or 1\n' "$voltron_option" >&2
+      exit 2
+      ;;
+  esac
+done
+
+VOLTRON_NO_STATE_LEARNING_EFFECTIVE=$VOLTRON_NO_STATE_LEARNING
+VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=$VOLTRON_NO_GUIDED_SCHEDULING
+if [ "$VOLTRON_OFFLINE_MUTATOR_ONLY" = 1 ]; then
+  VOLTRON_NO_STATE_LEARNING_EFFECTIVE=1
+  VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=1
+fi
 
 for interval_spec in \
   "VOLTRON_STATS_INTERVAL=$STATS_INTERVAL" \
@@ -621,7 +648,12 @@ write_postprocess_status() {
     "$VOLTRON_MODEL_BATCH" \
     "$IMPORTED_BUNDLE_ARCHIVE_STATUS" \
     "$VOLTRON_SOURCE_COMMIT" \
-    "$VOLTRON_LIFECYCLE_MODE" <<'PY'
+    "$VOLTRON_LIFECYCLE_MODE" \
+    "$VOLTRON_NO_SPEC_KNOWLEDGE" \
+    "$VOLTRON_NO_STATE_LEARNING_EFFECTIVE" \
+    "$VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE" \
+    "$VOLTRON_OFFLINE_MUTATOR_ONLY" \
+    "$VOLTRON_NO_LOAD_AFLNET_SEEDS" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -645,6 +677,11 @@ from pathlib import Path
     imported_bundle_archive_status,
     voltron_source_commit,
     lifecycle_mode,
+    no_spec_knowledge,
+    no_state_learning,
+    no_guided_scheduling,
+    offline_mutator_only,
+    no_load_aflnet_seeds,
 ) = sys.argv[1:]
 payload = {
     "voltron_status": int(voltron_status),
@@ -658,6 +695,11 @@ payload = {
     if int(component_export_status) == 0 else "PARTIAL",
     "voltron_run_mode": run_mode,
     "voltron_postprocess_mode": postprocess_mode,
+    "voltron_no_spec_knowledge": int(no_spec_knowledge),
+    "voltron_no_state_learning": int(no_state_learning),
+    "voltron_no_guided_scheduling": int(no_guided_scheduling),
+    "voltron_offline_mutator_only": int(offline_mutator_only),
+    "voltron_no_load_aflnet_seeds": int(no_load_aflnet_seeds),
     "learning_export_status": learning_export_status,
     "learning_bundle_sha256": learning_bundle_sha256,
     "model_import_status": model_import_status,
@@ -861,11 +903,27 @@ else
     mode_args=()
   fi
 fi
+voltron_option_args=()
+if [ "$VOLTRON_NO_SPEC_KNOWLEDGE" = 1 ]; then
+  voltron_option_args+=(--no-spec-knowledge)
+fi
+if [ "$VOLTRON_NO_STATE_LEARNING" = 1 ]; then
+  voltron_option_args+=(--no-state-learning)
+fi
+if [ "$VOLTRON_NO_GUIDED_SCHEDULING" = 1 ]; then
+  voltron_option_args+=(--no-guided-scheduling)
+fi
+if [ "$VOLTRON_OFFLINE_MUTATOR_ONLY" = 1 ]; then
+  voltron_option_args+=(--offline-mutator-only)
+fi
+if [ "$VOLTRON_NO_LOAD_AFLNET_SEEDS" = 1 ]; then
+  voltron_option_args+=(--no-load-aflnet-seeds)
+fi
 uv run cli.py \
   --sut "$VOLTRON_TARGET" \
   --algorithm state \
   --time "$TIMEOUT_MINUTES" \
-  --output "$OUTDIR" "${mode_args[@]}" &
+  --output "$OUTDIR" "${mode_args[@]}" "${voltron_option_args[@]}" &
 FUZZ_PID=$!
 
 last_status_sample=0

@@ -28,6 +28,11 @@ class ContainerManifestTests(unittest.TestCase):
                     "compliance_exit_code": 3,
                     "coverage_status": "COMPLETED",
                     "coverage_exit_code": 0,
+                    "voltron_no_spec_knowledge": 1,
+                    "voltron_no_state_learning": 0,
+                    "voltron_no_guided_scheduling": 0,
+                    "voltron_offline_mutator_only": 0,
+                    "voltron_no_load_aflnet_seeds": 0,
                     "model_batch": "example",
                     "model_import_status": "COMPLETED",
                     "imported_bundle_archive_status": "COMPLETED",
@@ -53,6 +58,16 @@ class ContainerManifestTests(unittest.TestCase):
                     "imported_bundle_archive_status"
                 ],
                 "COMPLETED",
+            )
+            self.assertEqual(
+                MODULE.read_postprocess_status(archive)[
+                    "voltron_no_spec_knowledge"
+                ],
+                1,
+            )
+            self.assertEqual(
+                MODULE.read_postprocess_status(archive)["voltron_no_load_aflnet_seeds"],
+                0,
             )
 
     def test_missing_or_invalid_status_is_empty(self) -> None:

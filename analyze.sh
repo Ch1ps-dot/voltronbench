@@ -86,6 +86,9 @@ for SUBJECT in "${SUBJECTS[@]}"; do
         for plot in "cov_over_time_${SUBJECT}.png" "state_over_time_${SUBJECT}.png"; do
             if [[ -f "$plot" ]]; then
                 cp "$plot" "$RES_PATH/"
+            elif [[ "$plot" == "cov_over_time_${SUBJECT}.png" \
+                && -f "$RESULT_DIR/.profuzzbench-coverage-deferred" ]]; then
+                info "Coverage replay is deferred for ${SUBJECT}; no coverage plot was generated."
             else
                 warn "Expected analysis plot is missing: $plot"
                 ANALYSIS_STATUS=1

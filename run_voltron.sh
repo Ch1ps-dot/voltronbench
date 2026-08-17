@@ -13,6 +13,33 @@ DELETE=${8:-}
 VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
 VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
 VOLTRON_LEARNING_BUNDLE_DIR=${VOLTRON_LEARNING_BUNDLE_DIR:-}
+VOLTRON_NO_SPEC_KNOWLEDGE=${VOLTRON_NO_SPEC_KNOWLEDGE:-0}
+VOLTRON_NO_STATE_LEARNING=${VOLTRON_NO_STATE_LEARNING:-0}
+VOLTRON_NO_GUIDED_SCHEDULING=${VOLTRON_NO_GUIDED_SCHEDULING:-0}
+VOLTRON_OFFLINE_MUTATOR_ONLY=${VOLTRON_OFFLINE_MUTATOR_ONLY:-0}
+VOLTRON_NO_LOAD_AFLNET_SEEDS=${VOLTRON_NO_LOAD_AFLNET_SEEDS:-0}
+
+for voltron_option in \
+  VOLTRON_NO_SPEC_KNOWLEDGE \
+  VOLTRON_NO_STATE_LEARNING \
+  VOLTRON_NO_GUIDED_SCHEDULING \
+  VOLTRON_OFFLINE_MUTATOR_ONLY \
+  VOLTRON_NO_LOAD_AFLNET_SEEDS; do
+  case "${!voltron_option}" in
+    0|1) ;;
+    *)
+      printf '%s must be either 0 or 1.\n' "$voltron_option" >&2
+      exit 2
+      ;;
+  esac
+done
+
+VOLTRON_NO_STATE_LEARNING_EFFECTIVE=$VOLTRON_NO_STATE_LEARNING
+VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=$VOLTRON_NO_GUIDED_SCHEDULING
+if [ "$VOLTRON_OFFLINE_MUTATOR_ONLY" = 1 ]; then
+  VOLTRON_NO_STATE_LEARNING_EFFECTIVE=1
+  VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=1
+fi
 
 case "$VOLTRON_RUN_MODE" in
   full|learn-export) ;;
@@ -435,6 +462,11 @@ for i in $(seq 1 "$RUNS"); do
       --label "voltronbench.run_id=${PROFUZZBENCH_RUN_ID}"
       --label "voltronbench.project=${TARGET}"
       --label "voltronbench.mode=${VOLTRON_RUN_MODE}"
+      --label "voltronbench.no_spec_knowledge=${VOLTRON_NO_SPEC_KNOWLEDGE}"
+      --label "voltronbench.no_state_learning=${VOLTRON_NO_STATE_LEARNING_EFFECTIVE}"
+      --label "voltronbench.no_guided_scheduling=${VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE}"
+      --label "voltronbench.offline_mutator_only=${VOLTRON_OFFLINE_MUTATOR_ONLY}"
+      --label "voltronbench.no_load_aflnet_seeds=${VOLTRON_NO_LOAD_AFLNET_SEEDS}"
       --label "voltronbench.project_index=${PROFUZZBENCH_PROJECT_INDEX:-0}"
       --label "voltronbench.stage_file=/home/ubuntu/voltron-runtime/${OUTDIR}/.profuzzbench-stage"
     )
@@ -450,6 +482,11 @@ for i in $(seq 1 "$RUNS"); do
   for env_name in \
     VOLTRON_RUN_MODE \
     VOLTRON_MODEL_BATCH \
+    VOLTRON_NO_SPEC_KNOWLEDGE \
+    VOLTRON_NO_STATE_LEARNING \
+    VOLTRON_NO_GUIDED_SCHEDULING \
+    VOLTRON_OFFLINE_MUTATOR_ONLY \
+    VOLTRON_NO_LOAD_AFLNET_SEEDS \
     VOLTRON_STATS_INTERVAL \
     VOLTRON_COMPLIANCE_ANALYZER \
     VOLTRON_RUN_COMPLIANCE_ANALYSIS \

@@ -36,6 +36,7 @@ while read -r RESULTDIR; do
     echo "REPLICATIONS: $REPS"
 
     rm -f results.csv
+    rm -f .profuzzbench-coverage-deferred .profuzzbench-coverage-deferred-*
     ls | grep out- | grep -v "tar.gz" | xargs rm -rf
 
     for FUZZER in $FUZZERS; do
@@ -57,7 +58,15 @@ while read -r RESULTDIR; do
         #fi
     done
 
-    if ! profuzzbench_plot.py -i "$DATADIR/$RESULTDIR/results.csv" -p "$TARGET" -r "$REPS" -c "$TIME" -s 1 -o "$DATADIR/cov_over_time_${TARGET}.png" -f $FUZZERS; then
+    if [[ $(wc -l < "$DATADIR/$RESULTDIR/results.csv") -gt 1 ]]; then
+        if ! profuzzbench_plot.py -i "$DATADIR/$RESULTDIR/results.csv" -p "$TARGET" -r "$REPS" -c "$TIME" -s 1 -o "$DATADIR/cov_over_time_${TARGET}.png" -f $FUZZERS; then
+            ANALYSIS_STATUS=1
+        fi
+    elif compgen -G ".profuzzbench-coverage-deferred-*" > /dev/null; then
+        touch .profuzzbench-coverage-deferred
+        echo "Coverage replay deferred; skipping coverage plot."
+    else
+        echo "No coverage measurements were available for $TARGET." >&2
         ANALYSIS_STATUS=1
     fi
     if ! profuzzbench_state.py -i "$DATADIR/$RESULTDIR/states.csv" -p "$TARGET" -r "$REPS" -c "$TIME" -s 1 -o "$DATADIR/state_over_time_${TARGET}.png" -f $FUZZERS; then
