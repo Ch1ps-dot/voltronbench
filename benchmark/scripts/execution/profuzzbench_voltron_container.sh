@@ -14,7 +14,7 @@ STATUS_SAMPLE_INTERVAL=${VOLTRON_STATUS_SAMPLE_INTERVAL_SECONDS:-$STATS_INTERVAL
 COMPLIANCE_ANALYZER=${VOLTRON_COMPLIANCE_ANALYZER:-analyze_compliance.py}
 RUN_COMPLIANCE_ANALYSIS=${VOLTRON_RUN_COMPLIANCE_ANALYSIS:-0}
 VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
-VOLTRON_POSTPROCESS_MODE=${VOLTRON_POSTPROCESS_MODE:-full}
+VOLTRON_POSTPROCESS_MODE=${VOLTRON_POSTPROCESS_MODE:-fuzz-only}
 VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
 VOLTRON_LEARNING_BUNDLE_PATH=${VOLTRON_LEARNING_BUNDLE_PATH:-}
 TIMEOUT_MINUTES=$(( (TIMEOUT_SECONDS + 59) / 60 ))
@@ -345,6 +345,9 @@ apply_forked_daapd_readiness_runtime_patch() {
 
   [ "$TARGET" = forked-daapd ] || return 0
   [ -r "$patch_file" ] || return 0
+  # Current Voltron main owns this timeout as a first-class executor setting.
+  # Its implementation no longer matches the historical patch context, so
+  # applying the patch would make an otherwise compatible snapshot fail.
   if grep -Fq 'def _wait_for_socket_readiness' voltron/executor/executor.py \
     && grep -Fq 'socket_readiness_timeout_s' voltron/executor/executor.py; then
     printf 'VOLTRON: native forked-daapd socket readiness timeout support is present\n'
