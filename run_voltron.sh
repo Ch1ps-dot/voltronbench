@@ -14,6 +14,7 @@ VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
 VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
 VOLTRON_LEARNING_BUNDLE_DIR=${VOLTRON_LEARNING_BUNDLE_DIR:-}
 VOLTRON_NO_SPEC_KNOWLEDGE=${VOLTRON_NO_SPEC_KNOWLEDGE:-0}
+VOLTRON_REUSE_NO_SPEC_BUNDLE=${VOLTRON_REUSE_NO_SPEC_BUNDLE:-0}
 VOLTRON_NO_STATE_LEARNING=${VOLTRON_NO_STATE_LEARNING:-0}
 VOLTRON_NO_GUIDED_SCHEDULING=${VOLTRON_NO_GUIDED_SCHEDULING:-0}
 VOLTRON_OFFLINE_MUTATOR_ONLY=${VOLTRON_OFFLINE_MUTATOR_ONLY:-0}
@@ -21,6 +22,7 @@ VOLTRON_NO_LOAD_AFLNET_SEEDS=${VOLTRON_NO_LOAD_AFLNET_SEEDS:-0}
 
 for voltron_option in \
   VOLTRON_NO_SPEC_KNOWLEDGE \
+  VOLTRON_REUSE_NO_SPEC_BUNDLE \
   VOLTRON_NO_STATE_LEARNING \
   VOLTRON_NO_GUIDED_SCHEDULING \
   VOLTRON_OFFLINE_MUTATOR_ONLY \
@@ -33,6 +35,13 @@ for voltron_option in \
       ;;
   esac
 done
+
+if [ "$VOLTRON_REUSE_NO_SPEC_BUNDLE" = 1 ] \
+  && { [ "$VOLTRON_NO_SPEC_KNOWLEDGE" != 1 ] \
+       || [ -z "$VOLTRON_MODEL_BATCH" ]; }; then
+  printf 'VOLTRON_REUSE_NO_SPEC_BUNDLE=1 requires VOLTRON_NO_SPEC_KNOWLEDGE=1 and VOLTRON_MODEL_BATCH.\n' >&2
+  exit 2
+fi
 
 VOLTRON_NO_STATE_LEARNING_EFFECTIVE=$VOLTRON_NO_STATE_LEARNING
 VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=$VOLTRON_NO_GUIDED_SCHEDULING
@@ -280,6 +289,13 @@ if [[ -n "$VOLTRON_MODEL_BATCH" ]] \
   printf 'VOLTRON: INCOMPATIBLE_VOLTRON_SNAPSHOT; model batch support is missing\n' >&2
   exit 2
 fi
+if [[ "$VOLTRON_REUSE_NO_SPEC_BUNDLE" == "1" ]] \
+  && { ! grep -Fq -- 'VOLTRON_REUSE_NO_SPEC_BUNDLE' "$VOLTRON_SOURCE/cli.py" \
+    || ! grep -Fq -- 'no_spec_bootstrap.json' \
+      "$VOLTRON_SOURCE/voltron/fuzz.py"; }; then
+  printf 'VOLTRON: INCOMPATIBLE_VOLTRON_SNAPSHOT; cached no-spec bundle support is missing\n' >&2
+  exit 2
+fi
 UV_CACHE_ROOT=${VOLTRON_UV_CACHE_ROOT:-"$ROOT/.runtime/voltron/uv-cache"}
 UV_CACHE_TEMPLATE=${VOLTRON_UV_CACHE_TEMPLATE:-"$ROOT/.runtime/voltron/uv-cache-template"}
 UV_CACHE_MODE=${VOLTRON_UV_CACHE_MODE:-prewarmed-private}
@@ -463,6 +479,7 @@ for i in $(seq 1 "$RUNS"); do
       --label "voltronbench.project=${TARGET}"
       --label "voltronbench.mode=${VOLTRON_RUN_MODE}"
       --label "voltronbench.no_spec_knowledge=${VOLTRON_NO_SPEC_KNOWLEDGE}"
+      --label "voltronbench.reuse_no_spec_bundle=${VOLTRON_REUSE_NO_SPEC_BUNDLE}"
       --label "voltronbench.no_state_learning=${VOLTRON_NO_STATE_LEARNING_EFFECTIVE}"
       --label "voltronbench.no_guided_scheduling=${VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE}"
       --label "voltronbench.offline_mutator_only=${VOLTRON_OFFLINE_MUTATOR_ONLY}"
@@ -483,6 +500,7 @@ for i in $(seq 1 "$RUNS"); do
     VOLTRON_RUN_MODE \
     VOLTRON_MODEL_BATCH \
     VOLTRON_NO_SPEC_KNOWLEDGE \
+    VOLTRON_REUSE_NO_SPEC_BUNDLE \
     VOLTRON_NO_STATE_LEARNING \
     VOLTRON_NO_GUIDED_SCHEDULING \
     VOLTRON_OFFLINE_MUTATOR_ONLY \

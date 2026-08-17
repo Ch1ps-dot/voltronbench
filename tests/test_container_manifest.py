@@ -29,6 +29,8 @@ class ContainerManifestTests(unittest.TestCase):
                     "coverage_status": "COMPLETED",
                     "coverage_exit_code": 0,
                     "voltron_no_spec_knowledge": 1,
+                    "no_spec_bundle_reused": 1,
+                    "experiment_group": "No-spec (cached LLM-only bundle)",
                     "voltron_no_state_learning": 0,
                     "voltron_no_guided_scheduling": 0,
                     "voltron_offline_mutator_only": 0,
@@ -63,6 +65,10 @@ class ContainerManifestTests(unittest.TestCase):
                 MODULE.read_postprocess_status(archive)[
                     "voltron_no_spec_knowledge"
                 ],
+                1,
+            )
+            self.assertEqual(
+                MODULE.read_postprocess_status(archive)["no_spec_bundle_reused"],
                 1,
             )
             self.assertEqual(

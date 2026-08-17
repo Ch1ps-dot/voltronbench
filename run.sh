@@ -224,6 +224,7 @@ VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
 VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
 VOLTRON_LEARNING_BUNDLE_DIR=${VOLTRON_LEARNING_BUNDLE_DIR:-}
 VOLTRON_NO_SPEC_KNOWLEDGE=${VOLTRON_NO_SPEC_KNOWLEDGE:-0}
+VOLTRON_REUSE_NO_SPEC_BUNDLE=${VOLTRON_REUSE_NO_SPEC_BUNDLE:-0}
 VOLTRON_NO_STATE_LEARNING=${VOLTRON_NO_STATE_LEARNING:-0}
 VOLTRON_NO_GUIDED_SCHEDULING=${VOLTRON_NO_GUIDED_SCHEDULING:-0}
 VOLTRON_OFFLINE_MUTATOR_ONLY=${VOLTRON_OFFLINE_MUTATOR_ONLY:-0}
@@ -258,6 +259,7 @@ if [[ "$uses_voltron" == "1" ]]; then
     export VOLTRON_RUN_MODE
     for voltron_option in \
         VOLTRON_NO_SPEC_KNOWLEDGE \
+        VOLTRON_REUSE_NO_SPEC_BUNDLE \
         VOLTRON_NO_STATE_LEARNING \
         VOLTRON_NO_GUIDED_SCHEDULING \
         VOLTRON_OFFLINE_MUTATOR_ONLY \
@@ -265,6 +267,12 @@ if [[ "$uses_voltron" == "1" ]]; then
         validate_gateway_switch "$voltron_option" "${!voltron_option}"
         export "$voltron_option"
     done
+    if [[ "$VOLTRON_REUSE_NO_SPEC_BUNDLE" == "1" \
+        && ( "$VOLTRON_NO_SPEC_KNOWLEDGE" != "1" \
+            || -z "$VOLTRON_MODEL_BATCH" ) ]]; then
+        echo "VOLTRON_REUSE_NO_SPEC_BUNDLE=1 requires VOLTRON_NO_SPEC_KNOWLEDGE=1 and VOLTRON_MODEL_BATCH." >&2
+        exit 1
+    fi
     VOLTRON_NO_STATE_LEARNING_EFFECTIVE=$VOLTRON_NO_STATE_LEARNING
     VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=$VOLTRON_NO_GUIDED_SCHEDULING
     if [[ "$VOLTRON_OFFLINE_MUTATOR_ONLY" == "1" ]]; then
@@ -545,6 +553,7 @@ fi
         printf 'voltron_run_mode=%s\n' "$VOLTRON_RUN_MODE"
         printf 'voltron_model_batch=%s\n' "${VOLTRON_MODEL_BATCH:-none}"
         printf 'voltron_no_spec_knowledge=%s\n' "$VOLTRON_NO_SPEC_KNOWLEDGE"
+        printf 'voltron_reuse_no_spec_bundle=%s\n' "$VOLTRON_REUSE_NO_SPEC_BUNDLE"
         printf 'voltron_no_state_learning=%s\n' "$VOLTRON_NO_STATE_LEARNING_EFFECTIVE"
         printf 'voltron_no_guided_scheduling=%s\n' "$VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE"
         printf 'voltron_offline_mutator_only=%s\n' "$VOLTRON_OFFLINE_MUTATOR_ONLY"
