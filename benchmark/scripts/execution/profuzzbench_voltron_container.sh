@@ -18,6 +18,7 @@ VOLTRON_POSTPROCESS_MODE=${VOLTRON_POSTPROCESS_MODE:-fuzz-only}
 VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
 VOLTRON_LEARNING_BUNDLE_PATH=${VOLTRON_LEARNING_BUNDLE_PATH:-}
 VOLTRON_NO_SPEC_KNOWLEDGE=${VOLTRON_NO_SPEC_KNOWLEDGE:-0}
+VOLTRON_REUSE_NO_SPEC_BUNDLE=${VOLTRON_REUSE_NO_SPEC_BUNDLE:-0}
 VOLTRON_NO_STATE_LEARNING=${VOLTRON_NO_STATE_LEARNING:-0}
 VOLTRON_NO_GUIDED_SCHEDULING=${VOLTRON_NO_GUIDED_SCHEDULING:-0}
 VOLTRON_OFFLINE_MUTATOR_ONLY=${VOLTRON_OFFLINE_MUTATOR_ONLY:-0}
@@ -50,6 +51,7 @@ esac
 
 for voltron_option in \
   VOLTRON_NO_SPEC_KNOWLEDGE \
+  VOLTRON_REUSE_NO_SPEC_BUNDLE \
   VOLTRON_NO_STATE_LEARNING \
   VOLTRON_NO_GUIDED_SCHEDULING \
   VOLTRON_OFFLINE_MUTATOR_ONLY \
@@ -62,6 +64,11 @@ for voltron_option in \
       ;;
   esac
 done
+
+if [ "$VOLTRON_REUSE_NO_SPEC_BUNDLE" = 1 ] && { [ "$VOLTRON_NO_SPEC_KNOWLEDGE" != 1 ] || [ -z "$VOLTRON_MODEL_BATCH" ]; }; then
+  printf 'VOLTRON: VOLTRON_REUSE_NO_SPEC_BUNDLE=1 requires VOLTRON_NO_SPEC_KNOWLEDGE=1 and VOLTRON_MODEL_BATCH\n' >&2
+  exit 2
+fi
 
 VOLTRON_NO_STATE_LEARNING_EFFECTIVE=$VOLTRON_NO_STATE_LEARNING
 VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=$VOLTRON_NO_GUIDED_SCHEDULING
@@ -650,6 +657,7 @@ write_postprocess_status() {
     "$VOLTRON_SOURCE_COMMIT" \
     "$VOLTRON_LIFECYCLE_MODE" \
     "$VOLTRON_NO_SPEC_KNOWLEDGE" \
+    "$VOLTRON_REUSE_NO_SPEC_BUNDLE" \
     "$VOLTRON_NO_STATE_LEARNING_EFFECTIVE" \
     "$VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE" \
     "$VOLTRON_OFFLINE_MUTATOR_ONLY" \
@@ -678,6 +686,7 @@ from pathlib import Path
     voltron_source_commit,
     lifecycle_mode,
     no_spec_knowledge,
+    reuse_no_spec_bundle,
     no_state_learning,
     no_guided_scheduling,
     offline_mutator_only,
@@ -696,6 +705,12 @@ payload = {
     "voltron_run_mode": run_mode,
     "voltron_postprocess_mode": postprocess_mode,
     "voltron_no_spec_knowledge": int(no_spec_knowledge),
+    "no_spec_bundle_reused": int(reuse_no_spec_bundle),
+    "experiment_group": (
+        "No-spec (cached LLM-only bundle)"
+        if int(reuse_no_spec_bundle)
+        else None
+    ),
     "voltron_no_state_learning": int(no_state_learning),
     "voltron_no_guided_scheduling": int(no_guided_scheduling),
     "voltron_offline_mutator_only": int(offline_mutator_only),
@@ -887,8 +902,10 @@ if ! import_model_batch; then
   exit 2
 fi
 
-if ! validate_imported_model_alphabet; then
-  exit 2
+if [ "$VOLTRON_REUSE_NO_SPEC_BUNDLE" != 1 ]; then
+  if ! validate_imported_model_alphabet; then
+    exit 2
+  fi
 fi
 
 if [ "$VOLTRON_RUN_MODE" = learn-export ]; then
