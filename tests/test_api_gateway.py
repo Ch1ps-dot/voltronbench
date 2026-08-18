@@ -96,6 +96,7 @@ profiles:
             settings, loaded_profiles = load_gateway_config(path)
 
         self.assertEqual(settings.queue_size, 12)
+        self.assertEqual(settings.queue_timeout_seconds, 60.0)
         self.assertEqual(
             [profile.max_concurrency for profile in loaded_profiles],
             [7, 3],

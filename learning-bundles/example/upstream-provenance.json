@@ -1,0 +1,92 @@
+[
+  {
+    "sut": "forked-daapd",
+    "source_run": "2026-08-13_17-08-55_kA5zlt",
+    "source_target": "forked-daapd",
+    "source_status": "completed_learning_export",
+    "bundle": "forked-daapd--completed_learning_export--2026-08-12_19-20-23_QigpZn.learning_bundle.tar.gz",
+    "sha256": "edaf8d92f330888b2f0f00945c91fefdbbd58138ce50238bc252743790bbf543",
+    "manifest_target": "forked-daapd",
+    "manifest_protocol": "daap"
+  },
+  {
+    "sut": "live555",
+    "source_run": "2026-08-12_19-20-23_QigpZn",
+    "source_target": "live555",
+    "source_status": "completed_learning_export",
+    "bundle": "live555--completed_learning_export--2026-08-12_19-20-23_QigpZn.learning_bundle.tar.gz",
+    "sha256": "9cb8ce62fe980c514bd394899cdb6e93b72c681d148df2607af482fde31b7c64",
+    "manifest_target": "live555",
+    "manifest_protocol": "rtsp"
+  },
+  {
+    "sut": "lighttpd",
+    "source_run": "2026-08-12_19-20-23_QigpZn",
+    "source_target": "lighttpd1",
+    "source_status": "completed_learning_export",
+    "bundle": "lighttpd--completed_learning_export--2026-08-12_19-20-23_QigpZn.learning_bundle.tar.gz",
+    "sha256": "838e936f87ca9260f838cff0b2e7802978843e7b6a0a8f279907434684a07509",
+    "manifest_target": "lighttpd",
+    "manifest_protocol": "http"
+  },
+  {
+    "sut": "exim",
+    "source_run": "2026-08-12_19-20-23_QigpZn",
+    "source_target": "exim",
+    "source_status": "partial_after_retry_exhausted",
+    "bundle": "exim--partial_after_retry_exhausted--2026-08-13_17-08-55_kA5zlt.repaired.learning_bundle.tar.gz",
+    "sha256": "11af4572eeb6bfd5e2b4a314b429432549e21855a1729c3c312cad1859218018",
+    "manifest_target": "exim",
+    "manifest_protocol": "smtp"
+  },
+  {
+    "sut": "kamailio",
+    "source_run": "2026-08-12_19-20-23_QigpZn",
+    "source_target": "kamailio",
+    "source_status": "completed_learning_export",
+    "bundle": "kamailio--completed_learning_export--2026-08-12_19-20-23_QigpZn.learning_bundle.tar.gz",
+    "sha256": "cdbc9b0752938c10983e25125a4cb7dd362321e59d47254b87ad1f566fba1633",
+    "manifest_target": "kamailio",
+    "manifest_protocol": "sip"
+  },
+  {
+    "sut": "bftpd",
+    "source_run": "2026-08-13_01-05-58_jB5miA",
+    "source_target": "bftpd",
+    "source_status": "deadline_partial",
+    "bundle": "bftpd--deadline_partial--2026-08-13_01-05-58_jB5miA.learning_bundle.tar.gz",
+    "sha256": "5b0dcdddba2ced145cdce29e4daa5b5117b1850e5a0868e7e84211979c3dd091",
+    "manifest_target": "bftpd",
+    "manifest_protocol": "ftp"
+  },
+  {
+    "sut": "lightftp",
+    "source_run": "2026-08-13_01-05-58_jB5miA",
+    "source_target": "lightftp",
+    "source_status": "deadline_partial",
+    "bundle": "lightftp--deadline_partial--2026-08-13_01-05-58_jB5miA.learning_bundle.tar.gz",
+    "sha256": "a61203d6bc03a62cc9e056ceb54ebfc1133b54882e07cf079f73dfba0f740ef1",
+    "manifest_target": "lightftp",
+    "manifest_protocol": "ftp"
+  },
+  {
+    "sut": "proftpd",
+    "source_run": "2026-08-13_01-05-58_jB5miA",
+    "source_target": "proftpd",
+    "source_status": "deadline_partial",
+    "bundle": "proftpd--deadline_partial--2026-08-13_01-05-58_jB5miA.learning_bundle.tar.gz",
+    "sha256": "c255802979af5852d3cc22cfd96b27a1e0721c51305ab7cd7856be46f564adce",
+    "manifest_target": "proftpd",
+    "manifest_protocol": "ftp"
+  },
+  {
+    "sut": "pureftpd",
+    "source_run": "2026-08-13_01-05-58_jB5miA",
+    "source_target": "pure-ftpd",
+    "source_status": "deadline_partial",
+    "bundle": "pureftpd--deadline_partial--2026-08-13_01-05-58_jB5miA.learning_bundle.tar.gz",
+    "sha256": "e26a7187b32bdf1361491177bd521ded9749933e18d09851933dad3d456addd0",
+    "manifest_target": "pureftpd",
+    "manifest_protocol": "ftp"
+  }
+]

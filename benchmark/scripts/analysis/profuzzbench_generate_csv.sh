@@ -21,7 +21,35 @@ if [ $append = "0" ]; then
 
   # This legacy file mixed StateAFL memory states with AFLNet response states.
   rm -f stateafl_memory_states.csv
+  rm -f .profuzzbench-coverage-deferred-*
 fi
+
+voltron_coverage_is_deferred() {
+  local archive=$1
+  local member=$2
+
+  python3 - "$archive" "$member" <<'PY'
+import json
+import sys
+import tarfile
+
+archive, member = sys.argv[1:]
+try:
+    with tarfile.open(archive, "r:*") as bundle:
+        stream = bundle.extractfile(member)
+        if stream is None:
+            raise ValueError("missing postprocess status")
+        status = json.load(stream)
+except (OSError, ValueError, KeyError, tarfile.TarError, json.JSONDecodeError):
+    raise SystemExit(1)
+
+raise SystemExit(0 if status.get("coverage_status") == "DEFERRED" else 1)
+PY
+}
+
+archive_has_member() {
+  tar -tf "$1" "$2" > /dev/null 2>&1
+}
 
 #remove space(s) 
 #it requires that there is no space in the middle
@@ -161,6 +189,38 @@ convert_response_state() {
   rm -f "$converted"
 }
 
+convert_voltron_state() {
+  local fuzzer=$1
+  local subject=$2
+  local run_index=$3
+  local ifile=$4
+  local ofile=$5
+  local converted
+
+  converted=$(mktemp)
+  if ! awk -F',' \
+      -v subject="$subject" \
+      -v fuzzer="$fuzzer" \
+      -v run_index="$run_index" '
+    NR == 1 {
+      for (column_index = 1; column_index <= NF; column_index++) columns[$column_index] = column_index
+      if (!("data_type" in columns) || !("time" in columns) || !("data" in columns)) exit 2
+      next
+    }
+    $(columns["data_type"]) == "nodes" || $(columns["data_type"]) == "edges" {
+      time = $(columns["time"])
+      value = $(columns["data"])
+      if (time !~ /^[0-9]+$/ || value !~ /^[0-9]+$/) exit 3
+      print time "," subject "," fuzzer "," run_index "," $(columns["data_type"]) "," value
+    }
+  ' "$ifile" > "$converted"; then
+    rm -f "$converted"
+    return 1
+  fi
+  cat "$converted" >> "$ofile"
+  rm -f "$converted"
+}
+
 #extract tar files & process the data
 status=0
 for fuzzer in $fuzzers; do 
@@ -169,9 +229,23 @@ for fuzzer in $fuzzers; do
     rm -rf out-${prog}-${fuzzer}-${i}
     archive="out-${prog}-${fuzzer}_${i}.tar.gz"
     output_dir="out-${prog}-${fuzzer}"
-    members=("${output_dir}/cov_over_time.csv")
+    coverage_deferred=0
+    if [ "$fuzzer" = "voltron" ] \
+      && voltron_coverage_is_deferred \
+        "$archive" "${output_dir}/postprocess_status.json"; then
+      coverage_deferred=1
+      touch ".profuzzbench-coverage-deferred-${fuzzer}"
+      printf " coverage deferred"
+    fi
+    members=()
+    if [ "$coverage_deferred" != 1 ]; then
+      members+=("${output_dir}/cov_over_time.csv")
+    fi
     if [ "$fuzzer" = "stateafl" ]; then
       members+=("${output_dir}/response_ipsm_metrics.csv")
+    elif [ "$fuzzer" = "voltron" ] \
+      && archive_has_member "$archive" "${output_dir}/states.csv"; then
+      members+=("${output_dir}/states.csv")
     else
       members+=("${output_dir}/plot_data")
     fi
@@ -196,6 +270,12 @@ for fuzzer in $fuzzers; do
         status=1
       fi
 
+    elif [ "$fuzzer" = "voltron" ] && [ -s out-${prog}-${fuzzer}-${i}/states.csv ]; then
+      if ! convert_voltron_state \
+          "$fuzzer" "$prog" "$i" \
+          "out-${prog}-${fuzzer}-${i}/states.csv" "$states_data"; then
+        status=1
+      fi
     elif [ -s out-${prog}-${fuzzer}-${i}/plot_data ]; then
       if ! convert_state \
           "$fuzzer" "$prog" "$i" \

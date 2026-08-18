@@ -12,6 +12,11 @@ FORKED_DAAPD_STARTUP_WAIT_US="${FORKED_DAAPD_STARTUP_WAIT_US:-1000000}"
 FORKED_DAAPD_MIN_TEST_TIMEOUT_MS="${FORKED_DAAPD_MIN_TEST_TIMEOUT_MS:-20000}"
 FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS="${FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS:-20}"
 
+FORKED_DAAPD_PREFLIGHT_ATTEMPTS="${FORKED_DAAPD_PREFLIGHT_ATTEMPTS:-300}"
+FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS="${FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS:-0.1}"
+FORKED_DAAPD_PREFLIGHT_RESPONSE_TIMEOUT_SECONDS="${FORKED_DAAPD_PREFLIGHT_RESPONSE_TIMEOUT_SECONDS:-2}"
+CHATAFL_LLM_CONNECT_TIMEOUT_MS="${CHATAFL_LLM_CONNECT_TIMEOUT_MS:-10000}"
+CHATAFL_LLM_REQUEST_TIMEOUT_MS="${CHATAFL_LLM_REQUEST_TIMEOUT_MS:-330000}"
 export TARGET_LIST=$3
 export FUZZER_LIST=$4
 
@@ -24,13 +29,28 @@ fi
 for timeout_setting in \
     TEST_TIMEOUT \
     FORKED_DAAPD_STARTUP_WAIT_US \
-    FORKED_DAAPD_MIN_TEST_TIMEOUT_MS; do
+    FORKED_DAAPD_MIN_TEST_TIMEOUT_MS \
+    FORKED_DAAPD_PREFLIGHT_ATTEMPTS \
+    FORKED_DAAPD_PREFLIGHT_RESPONSE_TIMEOUT_SECONDS \
+    CHATAFL_LLM_CONNECT_TIMEOUT_MS \
+    CHATAFL_LLM_REQUEST_TIMEOUT_MS; do
     timeout_value=${!timeout_setting}
     if [[ ! "$timeout_value" =~ ^[1-9][0-9]*$ ]]; then
         printf '%s must be a positive integer.\n' "$timeout_setting" >&2
         exit 1
     fi
 done
+if [[ ! "$FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] \
+    || ! awk "BEGIN { exit !($FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS > 0) }"; then
+    printf 'FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS must be a positive number.\n' >&2
+    exit 1
+fi
+
+if (( CHATAFL_LLM_REQUEST_TIMEOUT_MS < CHATAFL_LLM_CONNECT_TIMEOUT_MS )); then
+    printf 'CHATAFL_LLM_REQUEST_TIMEOUT_MS must be at least CHATAFL_LLM_CONNECT_TIMEOUT_MS.\n' >&2
+    exit 1
+fi
+
 
 if [[ ! "$FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
     echo "FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS must be a non-negative integer." >&2
@@ -45,6 +65,11 @@ fi
 export FORKED_DAAPD_STARTUP_WAIT_US
 export FORKED_DAAPD_MIN_TEST_TIMEOUT_MS
 export FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE
+export FORKED_DAAPD_PREFLIGHT_ATTEMPTS
+export FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS
+export FORKED_DAAPD_PREFLIGHT_RESPONSE_TIMEOUT_SECONDS
+export CHATAFL_LLM_CONNECT_TIMEOUT_MS
+export CHATAFL_LLM_REQUEST_TIMEOUT_MS
 export FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS
 
 CORE_PATTERN_PATH=/proc/sys/kernel/core_pattern
@@ -195,6 +220,15 @@ done
 
 CHATAFL_USE_API_GATEWAY=${CHATAFL_USE_API_GATEWAY:-1}
 VOLTRON_USE_API_GATEWAY=${VOLTRON_USE_API_GATEWAY:-1}
+VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
+VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
+VOLTRON_LEARNING_BUNDLE_DIR=${VOLTRON_LEARNING_BUNDLE_DIR:-}
+VOLTRON_NO_SPEC_KNOWLEDGE=${VOLTRON_NO_SPEC_KNOWLEDGE:-0}
+VOLTRON_REUSE_NO_SPEC_BUNDLE=${VOLTRON_REUSE_NO_SPEC_BUNDLE:-0}
+VOLTRON_NO_STATE_LEARNING=${VOLTRON_NO_STATE_LEARNING:-0}
+VOLTRON_NO_GUIDED_SCHEDULING=${VOLTRON_NO_GUIDED_SCHEDULING:-0}
+VOLTRON_OFFLINE_MUTATOR_ONLY=${VOLTRON_OFFLINE_MUTATOR_ONLY:-0}
+VOLTRON_NO_LOAD_AFLNET_SEEDS=${VOLTRON_NO_LOAD_AFLNET_SEEDS:-0}
 
 validate_gateway_switch() {
     local name=$1
@@ -215,6 +249,57 @@ if [[ "$uses_voltron" == "1" ]]; then
     validate_gateway_switch VOLTRON_USE_API_GATEWAY \
         "$VOLTRON_USE_API_GATEWAY"
     export VOLTRON_USE_API_GATEWAY
+    case "$VOLTRON_RUN_MODE" in
+        full|learn-export) ;;
+        *)
+            echo "VOLTRON_RUN_MODE must be either full or learn-export." >&2
+            exit 1
+            ;;
+    esac
+    export VOLTRON_RUN_MODE
+    for voltron_option in \
+        VOLTRON_NO_SPEC_KNOWLEDGE \
+        VOLTRON_REUSE_NO_SPEC_BUNDLE \
+        VOLTRON_NO_STATE_LEARNING \
+        VOLTRON_NO_GUIDED_SCHEDULING \
+        VOLTRON_OFFLINE_MUTATOR_ONLY \
+        VOLTRON_NO_LOAD_AFLNET_SEEDS; do
+        validate_gateway_switch "$voltron_option" "${!voltron_option}"
+        export "$voltron_option"
+    done
+    if [[ "$VOLTRON_REUSE_NO_SPEC_BUNDLE" == "1" \
+        && ( "$VOLTRON_NO_SPEC_KNOWLEDGE" != "1" \
+            || -z "$VOLTRON_MODEL_BATCH" ) ]]; then
+        echo "VOLTRON_REUSE_NO_SPEC_BUNDLE=1 requires VOLTRON_NO_SPEC_KNOWLEDGE=1 and VOLTRON_MODEL_BATCH." >&2
+        exit 1
+    fi
+    VOLTRON_NO_STATE_LEARNING_EFFECTIVE=$VOLTRON_NO_STATE_LEARNING
+    VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=$VOLTRON_NO_GUIDED_SCHEDULING
+    if [[ "$VOLTRON_OFFLINE_MUTATOR_ONLY" == "1" ]]; then
+        VOLTRON_NO_STATE_LEARNING_EFFECTIVE=1
+        VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=1
+    fi
+    if [[ -n "$VOLTRON_MODEL_BATCH" ]]; then
+        if [[ "$VOLTRON_RUN_MODE" != "full" ]]; then
+            echo "VOLTRON_MODEL_BATCH requires VOLTRON_RUN_MODE=full." >&2
+            exit 1
+        fi
+        if [[ ! "$VOLTRON_MODEL_BATCH" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "VOLTRON_MODEL_BATCH must be a safe batch name." >&2
+            exit 1
+        fi
+        if [[ -z "$VOLTRON_LEARNING_BUNDLE_DIR" ]]; then
+            echo "VOLTRON_MODEL_BATCH requires VOLTRON_LEARNING_BUNDLE_DIR." >&2
+            exit 1
+        fi
+        if [[ ! -d "$VOLTRON_LEARNING_BUNDLE_DIR" ]]; then
+            printf 'VOLTRON_LEARNING_BUNDLE_DIR is not a directory: %s\n' \
+                "$VOLTRON_LEARNING_BUNDLE_DIR" >&2
+            exit 1
+        fi
+        VOLTRON_LEARNING_BUNDLE_DIR=$(realpath "$VOLTRON_LEARNING_BUNDLE_DIR")
+        export VOLTRON_MODEL_BATCH VOLTRON_LEARNING_BUNDLE_DIR
+    fi
 fi
 
 uses_api_gateway=0
@@ -464,6 +549,19 @@ fi
     printf 'duration_minutes=%s\n' "$DURATION_MINUTES"
     printf 'targets=%s\n' "$TARGET_LIST"
     printf 'fuzzers=%s\n' "$FUZZER_LIST"
+    if [[ "$uses_voltron" == "1" ]]; then
+        printf 'voltron_run_mode=%s\n' "$VOLTRON_RUN_MODE"
+        printf 'voltron_model_batch=%s\n' "${VOLTRON_MODEL_BATCH:-none}"
+        printf 'voltron_no_spec_knowledge=%s\n' "$VOLTRON_NO_SPEC_KNOWLEDGE"
+        printf 'voltron_reuse_no_spec_bundle=%s\n' "$VOLTRON_REUSE_NO_SPEC_BUNDLE"
+        printf 'voltron_no_state_learning=%s\n' "$VOLTRON_NO_STATE_LEARNING_EFFECTIVE"
+        printf 'voltron_no_guided_scheduling=%s\n' "$VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE"
+        printf 'voltron_offline_mutator_only=%s\n' "$VOLTRON_OFFLINE_MUTATOR_ONLY"
+        printf 'voltron_no_load_aflnet_seeds=%s\n' "$VOLTRON_NO_LOAD_AFLNET_SEEDS"
+        if [[ -n "${VOLTRON_MODEL_BATCH:-}" ]]; then
+            printf 'voltron_learning_bundle_dir=%s\n' "$VOLTRON_LEARNING_BUNDLE_DIR"
+        fi
+    fi
     printf 'skipcount=%s\n' "$SKIPCOUNT"
     printf 'test_timeout_ms=%s\n' "$TEST_TIMEOUT"
     printf 'forked_daapd_startup_wait_us=%s\n' \
@@ -472,6 +570,15 @@ fi
         "$FORKED_DAAPD_MIN_TEST_TIMEOUT_MS"
     printf 'forked_daapd_test_timeout_ms_effective=%s\n' \
         "$FORKED_DAAPD_TEST_TIMEOUT_MS_EFFECTIVE"
+    printf 'forked_daapd_preflight_attempts=%s\n' \
+        "$FORKED_DAAPD_PREFLIGHT_ATTEMPTS"
+    printf 'forked_daapd_preflight_interval_seconds=%s\n' \
+        "$FORKED_DAAPD_PREFLIGHT_INTERVAL_SECONDS"
+    printf 'forked_daapd_preflight_response_timeout_seconds=%s\n' \
+        "$FORKED_DAAPD_PREFLIGHT_RESPONSE_TIMEOUT_SECONDS"
+    printf 'chatafl_llm_connect_timeout_ms=%s\n' "$CHATAFL_LLM_CONNECT_TIMEOUT_MS"
+    printf 'chatafl_llm_request_timeout_ms=%s\n' "$CHATAFL_LLM_REQUEST_TIMEOUT_MS"
+
     printf 'forked_daapd_container_start_delay_seconds=%s\n' \
         "$FORKED_DAAPD_CONTAINER_START_DELAY_SECONDS"
     printf 'raw_results_root=%s\n' "$RUN_ROOT"

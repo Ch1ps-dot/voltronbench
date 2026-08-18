@@ -1,5 +1,7 @@
 #define _GNU_SOURCE // asprintf
 #include <stdio.h>
+#include <errno.h>
+#include <stdlib.h>
 #include <curl/curl.h>
 #include <string.h>
 #include <ctype.h>
@@ -94,6 +96,23 @@ done:
         json_object_put(root);
     return answer;
 }
+static long timeout_from_environment(const char *name, long fallback)
+{
+    const char *raw = getenv(name);
+    char *end = NULL;
+    long value;
+
+    if (raw == NULL || raw[0] == '\0')
+        return fallback;
+
+    errno = 0;
+    value = strtol(raw, &end, 10);
+    if (errno != 0 || end == raw || *end != '\0' || value <= 0) {
+        fprintf(stderr, "ChatAFL: ignoring invalid %s; using %ld ms.\n", name, fallback);
+        return fallback;
+    }
+    return value;
+}
 
 char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
 {
@@ -106,6 +125,8 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
     char *auth_header = NULL;
     json_object *model_json = NULL;
     const char *encoded_model = NULL;
+    long connect_timeout_ms;
+    long request_timeout_ms;
 
     if (prompt == NULL || model == NULL || tries <= 0 ||
         configured_model == NULL || url == NULL || configured_api_key == NULL)
@@ -149,6 +170,16 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
         free(configured_api_key);
         return NULL;
     }
+    connect_timeout_ms = timeout_from_environment(
+        "CHATAFL_LLM_CONNECT_TIMEOUT_MS", 10000L);
+    request_timeout_ms = timeout_from_environment(
+        "CHATAFL_LLM_REQUEST_TIMEOUT_MS", 330000L);
+    if (request_timeout_ms < connect_timeout_ms) {
+        fprintf(stderr, "ChatAFL: total LLM timeout below connect timeout; "
+                        "using %ld ms.\n", connect_timeout_ms);
+        request_timeout_ms = connect_timeout_ms;
+    }
+
     curl_global_init(CURL_GLOBAL_DEFAULT);
     for (int attempt = 0; attempt < tries && answer == NULL; attempt++)
     {
@@ -177,8 +208,8 @@ char *chat_with_llm(char *prompt, char *model, int tries, float temperature)
             curl_easy_setopt(curl, CURLOPT_URL, url);
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, chat_with_llm_helper);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
-            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 10000L);
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 120000L);
+            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, connect_timeout_ms);
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, request_timeout_ms);
             curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
             res = curl_easy_perform(curl);

@@ -1,0 +1,9 @@
+5b0dcdddba2ced145cdce29e4daa5b5117b1850e5a0868e7e84211979c3dd091  ./bftpd/learning_bundle.tar.gz
+11af4572eeb6bfd5e2b4a314b429432549e21855a1729c3c312cad1859218018  ./exim/learning_bundle.tar.gz
+edaf8d92f330888b2f0f00945c91fefdbbd58138ce50238bc252743790bbf543  ./forked-daapd/learning_bundle.tar.gz
+cdbc9b0752938c10983e25125a4cb7dd362321e59d47254b87ad1f566fba1633  ./kamailio/learning_bundle.tar.gz
+a61203d6bc03a62cc9e056ceb54ebfc1133b54882e07cf079f73dfba0f740ef1  ./lightftp/learning_bundle.tar.gz
+838e936f87ca9260f838cff0b2e7802978843e7b6a0a8f279907434684a07509  ./lighttpd1/learning_bundle.tar.gz
+9cb8ce62fe980c514bd394899cdb6e93b72c681d148df2607af482fde31b7c64  ./live555/learning_bundle.tar.gz
+c255802979af5852d3cc22cfd96b27a1e0721c51305ab7cd7856be46f564adce  ./proftpd/learning_bundle.tar.gz
+e26a7187b32bdf1361491177bd521ded9749933e18d09851933dad3d456addd0  ./pure-ftpd/learning_bundle.tar.gz

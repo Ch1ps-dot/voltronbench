@@ -23,7 +23,7 @@ build_if_missing() {
   echo "building $tag"
   (cd "$PFBENCH" && cd "$ctx" && docker build . -f "$dockerfile" -t "$tag" \
     --build-arg "MAKE_OPT=${MAKE_OPT:-}" \
-    --build-arg "GITHUB_MIRROR=${GITHUB_MIRROR:-}" \
+    --build-arg "GITHUB_MIRROR=${GITHUB_MIRROR:-https://ghfast.top/}" \
     ${NO_CACHE:-})
 }
 

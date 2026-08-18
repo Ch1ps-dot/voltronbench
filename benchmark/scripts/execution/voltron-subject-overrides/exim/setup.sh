@@ -5,7 +5,7 @@ set -u
 # Voltron runs this hook once before the first interaction.  A fresh
 # container normally has no pidfile, so cleanup must be idempotent rather than
 # treating a missing or stale pidfile as a startup failure.
-PIDFILE=${EXIM_PIDFILE:-/var/lock/exim.pid}
+PIDFILE=${EXIM_PIDFILE:-/tmp/voltron-exim.pid}
 
 if [[ ! -s "$PIDFILE" ]]; then
   rm -f -- "$PIDFILE"

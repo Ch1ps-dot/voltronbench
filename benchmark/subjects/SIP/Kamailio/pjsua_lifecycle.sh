@@ -50,7 +50,7 @@ port_ready() {
   local udp_ready=0
   local tcp_ready=0
   if command -v ss >/dev/null 2>&1; then
-    ss -H -lun 2>/dev/null | awk '$5 ~ /:5068$/ { found=1 } END { exit(found ? 0 : 1) }' && udp_ready=1
+    ss -H -lun 2>/dev/null | awk '$4 ~ /:5068$/ { found=1 } END { exit(found ? 0 : 1) }' && udp_ready=1
     ss -H -ltn 2>/dev/null | awk '$4 ~ /:34254$/ { found=1 } END { exit(found ? 0 : 1) }' && tcp_ready=1
   elif command -v netstat >/dev/null 2>&1; then
     netstat -lun 2>/dev/null | awk '$4 ~ /:5068$/ { found=1 } END { exit(found ? 0 : 1) }' && udp_ready=1

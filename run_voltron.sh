@@ -10,6 +10,76 @@ OUTDIR=$5
 TIMEOUT=$6
 SKIPCOUNT=${7:-5}
 DELETE=${8:-}
+VOLTRON_RUN_MODE=${VOLTRON_RUN_MODE:-full}
+VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH:-}
+VOLTRON_LEARNING_BUNDLE_DIR=${VOLTRON_LEARNING_BUNDLE_DIR:-}
+VOLTRON_NO_SPEC_KNOWLEDGE=${VOLTRON_NO_SPEC_KNOWLEDGE:-0}
+VOLTRON_REUSE_NO_SPEC_BUNDLE=${VOLTRON_REUSE_NO_SPEC_BUNDLE:-0}
+VOLTRON_NO_STATE_LEARNING=${VOLTRON_NO_STATE_LEARNING:-0}
+VOLTRON_NO_GUIDED_SCHEDULING=${VOLTRON_NO_GUIDED_SCHEDULING:-0}
+VOLTRON_OFFLINE_MUTATOR_ONLY=${VOLTRON_OFFLINE_MUTATOR_ONLY:-0}
+VOLTRON_NO_LOAD_AFLNET_SEEDS=${VOLTRON_NO_LOAD_AFLNET_SEEDS:-0}
+
+for voltron_option in \
+  VOLTRON_NO_SPEC_KNOWLEDGE \
+  VOLTRON_REUSE_NO_SPEC_BUNDLE \
+  VOLTRON_NO_STATE_LEARNING \
+  VOLTRON_NO_GUIDED_SCHEDULING \
+  VOLTRON_OFFLINE_MUTATOR_ONLY \
+  VOLTRON_NO_LOAD_AFLNET_SEEDS; do
+  case "${!voltron_option}" in
+    0|1) ;;
+    *)
+      printf '%s must be either 0 or 1.\n' "$voltron_option" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ "$VOLTRON_REUSE_NO_SPEC_BUNDLE" = 1 ] \
+  && { [ "$VOLTRON_NO_SPEC_KNOWLEDGE" != 1 ] \
+       || [ -z "$VOLTRON_MODEL_BATCH" ]; }; then
+  printf 'VOLTRON_REUSE_NO_SPEC_BUNDLE=1 requires VOLTRON_NO_SPEC_KNOWLEDGE=1 and VOLTRON_MODEL_BATCH.\n' >&2
+  exit 2
+fi
+
+VOLTRON_NO_STATE_LEARNING_EFFECTIVE=$VOLTRON_NO_STATE_LEARNING
+VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=$VOLTRON_NO_GUIDED_SCHEDULING
+if [ "$VOLTRON_OFFLINE_MUTATOR_ONLY" = 1 ]; then
+  VOLTRON_NO_STATE_LEARNING_EFFECTIVE=1
+  VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE=1
+fi
+
+case "$VOLTRON_RUN_MODE" in
+  full|learn-export) ;;
+  *)
+    printf 'VOLTRON_RUN_MODE must be either full or learn-export.\n' >&2
+    exit 2
+    ;;
+esac
+
+if [ -n "$VOLTRON_MODEL_BATCH" ]; then
+  if [ "$VOLTRON_RUN_MODE" != full ]; then
+    printf 'VOLTRON_MODEL_BATCH requires VOLTRON_RUN_MODE=full.\n' >&2
+    exit 2
+  fi
+  case "$VOLTRON_MODEL_BATCH" in
+    *[!A-Za-z0-9._-]*|'')
+      printf 'VOLTRON_MODEL_BATCH must be a safe batch name.\n' >&2
+      exit 2
+      ;;
+  esac
+  if [ -z "$VOLTRON_LEARNING_BUNDLE_DIR" ]; then
+    printf 'VOLTRON_MODEL_BATCH requires VOLTRON_LEARNING_BUNDLE_DIR.\n' >&2
+    exit 2
+  fi
+  VOLTRON_LEARNING_BUNDLE_PATH="$VOLTRON_LEARNING_BUNDLE_DIR/$TARGET/learning_bundle.tar.gz"
+  if [ ! -r "$VOLTRON_LEARNING_BUNDLE_PATH" ]; then
+    printf 'VOLTRON: missing learning bundle for %s: %s\n' \
+      "$TARGET" "$VOLTRON_LEARNING_BUNDLE_PATH" >&2
+    exit 2
+  fi
+fi
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
 source "$ROOT/benchmark/scripts/execution/profuzzbench_monitor_common.sh"
@@ -208,7 +278,56 @@ handle_interrupt() {
 trap handle_interrupt INT TERM
 
 VOLTRON_SOURCE=$("$ROOT/scripts/prepare_voltron.sh")
+if [[ "$VOLTRON_RUN_MODE" == "learn-export" ]] \
+  && ! grep -Fq -- '--learn-and-export' "$VOLTRON_SOURCE/cli.py"; then
+  printf 'VOLTRON: INCOMPATIBLE_VOLTRON_SNAPSHOT; --learn-and-export is missing\n' >&2
+  exit 2
+fi
+if [[ -n "$VOLTRON_MODEL_BATCH" ]] \
+  && { ! grep -Fq -- '--import-learning-bundle' "$VOLTRON_SOURCE/cli.py" \
+    || ! grep -Fq -- '--model-batch' "$VOLTRON_SOURCE/cli.py"; }; then
+  printf 'VOLTRON: INCOMPATIBLE_VOLTRON_SNAPSHOT; model batch support is missing\n' >&2
+  exit 2
+fi
+if [[ "$VOLTRON_REUSE_NO_SPEC_BUNDLE" == "1" ]] \
+  && { ! grep -Fq -- 'VOLTRON_REUSE_NO_SPEC_BUNDLE' "$VOLTRON_SOURCE/cli.py" \
+    || ! grep -Fq -- 'no_spec_bootstrap.json' \
+      "$VOLTRON_SOURCE/voltron/fuzz.py"; }; then
+  printf 'VOLTRON: INCOMPATIBLE_VOLTRON_SNAPSHOT; cached no-spec bundle support is missing\n' >&2
+  exit 2
+fi
 UV_CACHE_ROOT=${VOLTRON_UV_CACHE_ROOT:-"$ROOT/.runtime/voltron/uv-cache"}
+UV_CACHE_TEMPLATE=${VOLTRON_UV_CACHE_TEMPLATE:-"$ROOT/.runtime/voltron/uv-cache-template"}
+UV_CACHE_MODE=${VOLTRON_UV_CACHE_MODE:-prewarmed-private}
+UV_CACHE_PERMISSION_HELPER="$ROOT/scripts/normalize_voltron_uv_cache_permissions.sh"
+
+prepare_uv_cache_instance() {
+  local cache_dir=$1
+  local temporary
+
+  if [ -f "$cache_dir/.ready" ]; then
+    "$UV_CACHE_PERMISSION_HELPER" "$cache_dir"
+    return $?
+  fi
+  mkdir -p "$(dirname "$cache_dir")"
+  temporary=$(mktemp -d "${cache_dir}.tmp.XXXXXX")
+  if ! cp -a --reflink=auto "$UV_CACHE_TEMPLATE/." "$temporary/"; then
+    mv "$temporary" "${cache_dir}.failed.$(date +%s).$$" 2>/dev/null || true
+    return 1
+  fi
+  if ! "$UV_CACHE_PERMISSION_HELPER" "$temporary"; then
+    mv "$temporary" "${cache_dir}.failed.$(date +%s).$$" 2>/dev/null || true
+    return 1
+  fi
+  if [ -e "$cache_dir" ]; then
+    mv "$cache_dir" "${cache_dir}.incomplete.$(date +%s).$$"
+  fi
+  mv "$temporary" "$cache_dir"
+}
+
+if [ "$UV_CACHE_MODE" != legacy ]; then
+  "$ROOT/scripts/prepare_voltron_uv_cache.sh" "$DOCIMAGE" "$VOLTRON_SOURCE"
+fi
 
 VOLTRON_LLM_CONFIG=${VOLTRON_LLM_CONFIG:-"$ROOT/config/voltron-llm.yaml"}
 VOLTRON_KEY_POOL_COUNTER=${VOLTRON_LLM_API_KEY_COUNTER:-"$ROOT/.runtime/voltron/api-profile-counter"}
@@ -306,11 +425,25 @@ for i in $(seq 1 "$RUNS"); do
   # a specific cache with VOLTRON_UV_CACHE_DIR for single-container runs.
   if [ -n "${VOLTRON_UV_CACHE_DIR:-}" ]; then
     UV_CACHE="$VOLTRON_UV_CACHE_DIR"
+  elif [ "$UV_CACHE_MODE" != legacy ]; then
+    UV_CACHE="$UV_CACHE_ROOT/runs/${MANIFEST_RUN_ID}/${TARGET}-${i}"
   else
     UV_CACHE="$UV_CACHE_ROOT/${TARGET}-${i}"
   fi
+  if [ "$UV_CACHE_MODE" != legacy ] \
+    && ! prepare_uv_cache_instance "$UV_CACHE"; then
+    printf 'VOLTRON: failed to prepare private uv cache: %s\n' \
+      "$UV_CACHE" >&2
+    stop_docker_event_collector
+    exit 2
+  fi
   mkdir -p "$UV_CACHE"
-  chmod 0777 "$UV_CACHE"
+  if ! "$UV_CACHE_PERMISSION_HELPER" "$UV_CACHE"; then
+    printf 'VOLTRON: failed to normalize uv cache permissions: %s\n' \
+      "$UV_CACHE" >&2
+    stop_docker_event_collector
+    exit 2
+  fi
   docker_args=(
     run --init --cpus=1 -d -it
     --mount "type=bind,src=${VOLTRON_SOURCE},dst=/opt/voltron-src,readonly"
@@ -318,6 +451,7 @@ for i in $(seq 1 "$RUNS"); do
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-subject-overrides,dst=/opt/voltron-subject-overrides,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-main-runtime.patch,dst=/opt/voltron-main-runtime.patch,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-udp-bind-runtime.patch,dst=/opt/voltron-udp-bind-runtime.patch,readonly"
+    --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-executor-readiness-runtime.patch,dst=/opt/voltron-executor-readiness-runtime.patch,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/voltron-generator-evolution-runtime.patch,dst=/opt/voltron-generator-evolution-runtime.patch,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_export_voltron_replay.py,dst=/opt/voltron-export-aflnet-replay.py,readonly"
     --mount "type=bind,src=${ROOT}/benchmark/scripts/execution/profuzzbench_voltron_coverage.sh,dst=/opt/voltron-coverage.sh,readonly"
@@ -326,6 +460,16 @@ for i in $(seq 1 "$RUNS"); do
     -e UV_CACHE_DIR=/home/ubuntu/.cache/uv
     -e UV_PYTHON_INSTALL_DIR=/home/ubuntu/.cache/uv/python
   )
+  if [ -n "$VOLTRON_MODEL_BATCH" ]; then
+    docker_args+=(
+      --mount "type=bind,src=${VOLTRON_LEARNING_BUNDLE_PATH},dst=/opt/voltron-learning-bundle.tar.gz,readonly"
+      -e "VOLTRON_MODEL_BATCH=${VOLTRON_MODEL_BATCH}"
+      -e VOLTRON_LEARNING_BUNDLE_PATH=/opt/voltron-learning-bundle.tar.gz
+    )
+  fi
+  if [ "$UV_CACHE_MODE" != legacy ]; then
+    docker_args+=(-e UV_OFFLINE=1)
+  fi
   if [ "$TARGET" = "kamailio" ]; then
     docker_args+=(--env KAMAILIO_CONTAINER_INIT=enabled)
   fi
@@ -333,6 +477,13 @@ for i in $(seq 1 "$RUNS"); do
     docker_args+=(
       --label "voltronbench.run_id=${PROFUZZBENCH_RUN_ID}"
       --label "voltronbench.project=${TARGET}"
+      --label "voltronbench.mode=${VOLTRON_RUN_MODE}"
+      --label "voltronbench.no_spec_knowledge=${VOLTRON_NO_SPEC_KNOWLEDGE}"
+      --label "voltronbench.reuse_no_spec_bundle=${VOLTRON_REUSE_NO_SPEC_BUNDLE}"
+      --label "voltronbench.no_state_learning=${VOLTRON_NO_STATE_LEARNING_EFFECTIVE}"
+      --label "voltronbench.no_guided_scheduling=${VOLTRON_NO_GUIDED_SCHEDULING_EFFECTIVE}"
+      --label "voltronbench.offline_mutator_only=${VOLTRON_OFFLINE_MUTATOR_ONLY}"
+      --label "voltronbench.no_load_aflnet_seeds=${VOLTRON_NO_LOAD_AFLNET_SEEDS}"
       --label "voltronbench.project_index=${PROFUZZBENCH_PROJECT_INDEX:-0}"
       --label "voltronbench.stage_file=/home/ubuntu/voltron-runtime/${OUTDIR}/.profuzzbench-stage"
     )
@@ -345,7 +496,20 @@ for i in $(seq 1 "$RUNS"); do
       -e "VOLTRON_LLM_MODEL=${VOLTRON_GATEWAY_MODEL:-voltron-default}"
     )
   fi
-  for env_name in VOLTRON_STATS_INTERVAL VOLTRON_COMPLIANCE_ANALYZER; do
+  for env_name in \
+    VOLTRON_RUN_MODE \
+    VOLTRON_MODEL_BATCH \
+    VOLTRON_NO_SPEC_KNOWLEDGE \
+    VOLTRON_REUSE_NO_SPEC_BUNDLE \
+    VOLTRON_NO_STATE_LEARNING \
+    VOLTRON_NO_GUIDED_SCHEDULING \
+    VOLTRON_OFFLINE_MUTATOR_ONLY \
+    VOLTRON_NO_LOAD_AFLNET_SEEDS \
+    VOLTRON_STATS_INTERVAL \
+    VOLTRON_COMPLIANCE_ANALYZER \
+    VOLTRON_RUN_COMPLIANCE_ANALYSIS \
+    VOLTRON_FORKED_DAAPD_SETUP_TIMEOUT_SECONDS \
+    VOLTRON_FORKED_DAAPD_READINESS_TIMEOUT_SECONDS; do
     if [ -n "${!env_name:-}" ]; then
       docker_args+=(-e "${env_name}=${!env_name}")
     fi

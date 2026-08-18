@@ -1,0 +1,5 @@
+voltron_ref=main
+voltron_commit=0cb808d8d04513272bd2458fd51bf075e03e0273
+source=/home/qiupf/exp3/.runtime/voltron/snapshots/0cb808d8d04513272bd2458fd51bf075e03e0273/component/import-bundles/example
+complete_learning_export_targets=forked-daapd,kamailio,lighttpd1,live555
+partial_guidance_targets=bftpd,exim,lightftp,proftpd,pure-ftpd

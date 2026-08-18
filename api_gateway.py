@@ -53,7 +53,7 @@ class GatewaySettings:
     host: str = "0.0.0.0"
     port: int = 8000
     queue_size: int = 256
-    queue_timeout_seconds: float = 30.0
+    queue_timeout_seconds: float = 60.0
     upstream_timeout_seconds: float = 120.0
     max_attempts: int = 2
     rate_limit_cooldown_seconds: float = 5.0
@@ -142,7 +142,7 @@ def load_gateway_config(path: Path) -> tuple[GatewaySettings, list[Profile]]:
         port=_positive_int(gateway, "port", 8000),
         queue_size=_positive_int(gateway, "queue_size", 256),
         queue_timeout_seconds=_positive_float(
-            gateway, "queue_timeout_seconds", 30.0
+            gateway, "queue_timeout_seconds", 60.0
         ),
         upstream_timeout_seconds=_positive_float(
             gateway, "upstream_timeout_seconds", 120.0
@@ -398,8 +398,17 @@ class GatewayApplication:
     ) -> None:
         self.settings = settings
         self.scheduler = CapacityScheduler(profiles, settings)
+        upstream_capacity = sum(
+            profile.max_concurrency
+            for profile in profiles
+            if profile.enabled
+        )
         self.client = client or httpx.AsyncClient(
-            timeout=httpx.Timeout(settings.upstream_timeout_seconds)
+            timeout=httpx.Timeout(settings.upstream_timeout_seconds),
+            limits=httpx.Limits(
+                max_connections=upstream_capacity,
+                max_keepalive_connections=min(upstream_capacity, 100),
+            ),
         )
         self.owns_client = client is None
 

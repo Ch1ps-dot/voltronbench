@@ -38,10 +38,11 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
     def test_overrides_are_shell_valid_and_cover_failed_suts(self) -> None:
         expected = {
             "bftpd": {"run.sh"},
-            "exim": {"setup.sh"},
+            "exim": {"setup.sh", "run.sh", "ready.sh"},
             "forked-daapd": {"setup.sh", "run.sh"},
             "kamailio": {"setup.sh", "run.sh", "pjsua_lifecycle.sh"},
             "lightftp": {"setup.sh", "run.sh"},
+            "live555": {"run.sh"},
             "pure-ftpd": {"setup.sh"},
         }
         overrides = EXECUTION_DIR / "voltron-subject-overrides"
@@ -64,6 +65,23 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
 
         self.assertIn("exec /home/ubuntu/experiments/bftpd/bftpd", run_script)
         self.assertIn("/home/ubuntu/experiments/basic.conf", run_script)
+
+    def test_live555_override_starts_server_from_media_directory(self) -> None:
+        run_script = (
+            EXECUTION_DIR / "voltron-subject-overrides" / "live555" / "run.sh"
+        ).read_text(encoding="utf-8")
+        container_runner = (
+            EXECUTION_DIR / "profuzzbench_voltron_container.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("set -eu", run_script)
+        self.assertIn("cd /home/ubuntu/experiments/live/testProgs", run_script)
+        self.assertIn("test.aac test.ac3 test.mpg", run_script)
+        self.assertIn("exec ./testOnDemandRTSPServer 8554", run_script)
+        self.assertIn(
+            "Live555 lifecycle override did not start from the media directory",
+            container_runner,
+        )
 
     def test_exim_setup_is_idempotent_and_pid_scoped(self) -> None:
         setup = EXECUTION_DIR / "voltron-subject-overrides" / "exim" / "setup.sh"
@@ -126,6 +144,31 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
                     target.kill()
                     target.wait(timeout=5)
 
+    def test_exim_override_owns_server_and_checks_smtp_banner(self) -> None:
+        exim_dir = EXECUTION_DIR / "voltron-subject-overrides" / "exim"
+        run_script = (exim_dir / "run.sh").read_text(encoding="utf-8")
+        readiness_script = (exim_dir / "ready.sh").read_text(encoding="utf-8")
+        container_runner = (
+            EXECUTION_DIR / "profuzzbench_voltron_container.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("exec /usr/exim/bin/exim", run_script)
+        self.assertIn("/tmp/voltron-exim.pid", run_script)
+        self.assertIn("banner.startswith(b\"220 \")", readiness_script)
+        self.assertIn("apply_exim_lifecycle_override", container_runner)
+        self.assertIn("readiness_script: ready.sh", container_runner)
+
+    def test_forked_daapd_uses_a_target_scoped_readiness_default(self) -> None:
+        container_runner = (
+            EXECUTION_DIR / "profuzzbench_voltron_container.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "VOLTRON_FORKED_DAAPD_READINESS_TIMEOUT_SECONDS:-10",
+            container_runner,
+        )
+        self.assertIn("apply_forked_daapd_timeout_overrides", container_runner)
+
     def test_runner_applies_overrides_and_main_retry_patch(self) -> None:
         host_runner = (PROJECT_ROOT / "run_voltron.sh").read_text(
             encoding="utf-8"
@@ -143,6 +186,16 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
         self.assertIn("voltron-subject-overrides", host_runner)
         self.assertIn("voltron-main-runtime.patch", host_runner)
         self.assertIn("voltron-generator-evolution-runtime.patch", host_runner)
+        self.assertIn("VOLTRON_NO_SPEC_KNOWLEDGE", host_runner)
+        self.assertIn("VOLTRON_REUSE_NO_SPEC_BUNDLE", host_runner)
+        self.assertIn("cached no-spec bundle support is missing", host_runner)
+        self.assertIn("VOLTRON_NO_STATE_LEARNING", host_runner)
+        self.assertIn("VOLTRON_NO_GUIDED_SCHEDULING", host_runner)
+        self.assertIn("VOLTRON_OFFLINE_MUTATOR_ONLY", host_runner)
+        self.assertIn("VOLTRON_NO_LOAD_AFLNET_SEEDS", host_runner)
+        self.assertIn("voltronbench.offline_mutator_only", host_runner)
+        self.assertIn("voltronbench.reuse_no_spec_bundle", host_runner)
+        self.assertIn("voltronbench.no_load_aflnet_seeds", host_runner)
         self.assertIn("apply_subject_overrides", container_runner)
         self.assertIn("verify_subject_lifecycle_override", container_runner)
         self.assertIn(
@@ -159,6 +212,14 @@ class VoltronMainSnapshotOverrideTests(unittest.TestCase):
         self.assertIn("RAW_SHA256_OBSERVER", container_runner)
         self.assertIn("using raw SHA-256 observer fallback", container_runner)
         self.assertIn("COMPLIANCE_ANALYZER:-analyze_compliance.py", container_runner)
+        self.assertIn("VOLTRON_NO_SPEC_KNOWLEDGE:-0", container_runner)
+        self.assertIn("VOLTRON_REUSE_NO_SPEC_BUNDLE:-0", container_runner)
+        self.assertIn("VOLTRON_NO_STATE_LEARNING:-0", container_runner)
+        self.assertIn("VOLTRON_NO_GUIDED_SCHEDULING:-0", container_runner)
+        self.assertIn("VOLTRON_OFFLINE_MUTATOR_ONLY:-0", container_runner)
+        self.assertIn("VOLTRON_NO_LOAD_AFLNET_SEEDS:-0", container_runner)
+        self.assertIn("--no-load-aflnet-seeds", container_runner)
+        self.assertIn("--offline-mutator-only", container_runner)
         self.assertIn('--input "$OUTDIR"', container_runner)
         self.assertIn("generation_retry_limit", runtime_patch)
         self.assertIn("giving up mutator generation", runtime_patch)
