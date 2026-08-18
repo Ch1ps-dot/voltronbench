@@ -820,22 +820,18 @@ IMPORTED_BUNDLE_ARCHIVE_STATUS=NOT_REQUESTED
 
 import_model_batch() {
   local report="$OUTDIR/model_import.json"
-  local -a import_mode_args=()
 
   [ -n "$VOLTRON_MODEL_BATCH" ] || return 0
-  # Voltron main validates the cached no-spec mode during bundle import,
-  # before the later fuzzing mode arguments are assembled.  Pass the same
-  # mode contract here so imported no-spec bundles are accepted.
-  if [ "$VOLTRON_REUSE_NO_SPEC_BUNDLE" = 1 ]; then
-    import_mode_args+=(--no-spec-knowledge --model-batch "$VOLTRON_MODEL_BATCH")
-  fi
   set_stage "IMPORTING 0/4: activating model batch $VOLTRON_MODEL_BATCH"
   MODEL_IMPORT_BUNDLE_SHA256=$(sha256sum "$VOLTRON_LEARNING_BUNDLE_PATH" | awk '{print $1}')
-  if uv run cli.py \
+  # The import command accepts --batch-id, but Voltron main rejects
+  # --model-batch together with --import-learning-bundle.  Disable the
+  # reuse-mode CLI validation only for this import subprocess; the actual
+  # fuzzing invocation below still receives the reuse/no-spec settings.
+  if VOLTRON_REUSE_NO_SPEC_BUNDLE=0 uv run cli.py \
       --sut "$VOLTRON_TARGET" \
       --import-learning-bundle "$VOLTRON_LEARNING_BUNDLE_PATH" \
-      --activate-import --batch-id "$VOLTRON_MODEL_BATCH" \
-      "${import_mode_args[@]}" >"$report" 2>&1; then
+      --activate-import --batch-id "$VOLTRON_MODEL_BATCH" >"$report" 2>&1; then
     MODEL_IMPORT_STATUS=COMPLETED
     return 0
   fi
